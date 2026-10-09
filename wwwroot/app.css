@@ -665,7 +665,8 @@ md-filled-button.danger {
 md-outlined-field.m3-field { display: block; width: 100%; --md-outlined-field-container-shape: 8px; }
 .pane.tonal md-outlined-field.m3-field { --md-outlined-field-outline-color: var(--md-sys-color-outline); }
 /* Das Feld (Shadow DOM) setzt Schrift, Abstände und Farben des Eingabeelements selbst. */
-.m3-input { caret-color: var(--md-sys-color-primary); min-width: 0; }
+/* Kein Fokusring am Eingabeelement selbst – den Fokus zeigt schon der Rahmen des Feldes. */
+.m3-input { caret-color: var(--md-sys-color-primary); min-width: 0; outline: none; }
 input.m3-input[list]::-webkit-calendar-picker-indicator { display: none !important; }
 textarea.m3-input { resize: vertical; }
 .m3-input::placeholder { color: var(--md-sys-color-on-surface-variant); }
