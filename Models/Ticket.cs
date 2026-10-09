@@ -16,9 +16,10 @@ public class Ticket
     public string Betreff { get; set; } = "";
 
     // ── Allgemeine Informationen ───────────────────────────
-    [MaxLength(200)] public string? Ansprechpartner { get; set; }
-    [MaxLength(200)] public string? Mandant { get; set; }
-    [MaxLength(100)] public string? Umfeld { get; set; }
+    // Können mehrere Werte enthalten, getrennt mit „; “ (siehe Auswahl.Trenner)
+    [MaxLength(1000)] public string? Ansprechpartner { get; set; }
+    [MaxLength(1000)] public string? Mandant { get; set; }
+    [MaxLength(1000)] public string? Umfeld { get; set; }
     [MaxLength(300)] public string? FeatureBranch { get; set; }
 
     // ── Zeitangaben ─────────────────────────────────────────

@@ -76,6 +76,9 @@
                     @if (zaehler.ProStatus.GetValueOrDefault(s) is > 0 and var n) { <span class="nav-count">@n</span> }
                 </a>
             }
+
+            <md-divider></md-divider>
+            @NavEintrag("einstellungen", "tune", "Einstellungen", 0, pfad == "einstellungen")
         </div>
     </nav>
 

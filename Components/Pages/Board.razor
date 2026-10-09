@@ -63,7 +63,7 @@ else
                             </div>
                             <div class="card-title">@t.Betreff</div>
                             <div class="card-meta">
-                                @if (!string.IsNullOrWhiteSpace(t.Mandant)) { <span class="card-chip">@t.Mandant</span> }
+                                @if (!string.IsNullOrWhiteSpace(t.Mandant)) { <span class="card-chip">@Auswahl.Anzeige(t.Mandant)</span> }
                                 @if (t.Status == TicketStatus.Wartend && !string.IsNullOrWhiteSpace(t.WartetAuf))
                                 {
                                     <span class="card-wait"><md-icon>hourglass_top</md-icon>@t.WartetAuf</span>

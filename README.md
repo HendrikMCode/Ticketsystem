@@ -27,7 +27,7 @@ Alle Tickets liegen in **`Daten/tickets.db`** (SQLite) im Projektordner. Die Dat
 | Bereich | Felder |
 |---|---|
 | Kopf | Ticketnummer (automatisch `DEV-0001`, `DEV-0002` …, frei änderbar), Betreff |
-| Allgemein | Ansprechpartner, Mandant, Umfeld, Feature-Branch (mit Vorschlägen aus bisherigen Eingaben) |
+| Allgemein | Ansprechpartner, Mandant, Umfeld (ein oder mehrere Einträge aus den Auswahllisten unter **Einstellungen**), Feature-Branch |
 | Zeitangaben | Aufgabe erhalten, Erinnerung (mit Schnellwahl), Fälligkeitsdatum, Erledigt am |
 | Status | Status, Wartet auf, Wartegrund, Wartet seit |
 | Tests | Lokal-Test, Consultant-Test |

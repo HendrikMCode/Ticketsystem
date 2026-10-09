@@ -392,8 +392,11 @@ else
         var verteilung = klassen.Select(k => (k.Item1, dauern.Count(k.Item2))).ToList();
 
         var imZeitraum = alle.Where(t => ImZeitraum(Erhalten(t))).ToList();
-        var gruppen = imZeitraum.GroupBy(t => string.IsNullOrWhiteSpace(t.Mandant) ? "Ohne Mandant" : t.Mandant.Trim())
-            .Select(g => new Mandant(g.Key, g.Count(t => !t.Erledigt), g.Count(t => t.Erledigt)))
+        // Ein Ticket mit mehreren Mandanten zählt bei jedem davon
+        var gruppen = imZeitraum
+            .SelectMany(t => Auswahl.Trennen(t.Mandant).DefaultIfEmpty("Ohne Mandant"), (t, m) => (Ticket: t, Mandant: m))
+            .GroupBy(x => x.Mandant, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new Mandant(g.Key, g.Count(x => !x.Ticket.Erledigt), g.Count(x => x.Ticket.Erledigt)))
             .OrderByDescending(m => m.Offen + m.Erledigt).ThenBy(m => m.Name).ToList();
         if (gruppen.Count > 8)
         {

@@ -9,6 +9,7 @@ public class TicketDbContext(DbContextOptions<TicketDbContext> options) : DbCont
     public DbSet<Schritt> Schritte => Set<Schritt>();
     public DbSet<Aufgabe> Aufgaben => Set<Aufgabe>();
     public DbSet<Bild> Bilder => Set<Bild>();
+    public DbSet<Auswahlwert> Auswahlwerte => Set<Auswahlwert>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -44,6 +45,13 @@ public class TicketDbContext(DbContextOptions<TicketDbContext> options) : DbCont
         {
             e.ToTable("Aufgaben");
             e.Property(a => a.Status).HasConversion<string>().HasMaxLength(20);
+        });
+
+        b.Entity<Auswahlwert>(e =>
+        {
+            e.ToTable("Auswahlwerte");
+            e.Property(a => a.Feld).HasConversion<string>().HasMaxLength(20);
+            e.HasIndex(a => a.Feld);
         });
     }
 }

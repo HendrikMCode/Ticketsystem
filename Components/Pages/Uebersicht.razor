@@ -25,6 +25,37 @@
     {
         <md-text-button @onclick="DatumsfilterEntfernen">Filter löschen</md-text-button>
     }
+
+    @* ── Sortieren ── *@
+    <span class="spacer"></span>
+    <div class="date-filter">
+        <button type="button" class="filter-chip date @(SortFeld is not null ? "selected" : null)"
+                aria-haspopup="menu" aria-expanded="@(sortMenuOffen ? "true" : "false")" @onclick="() => sortMenuOffen = !sortMenuOffen">
+            <md-ripple></md-ripple>
+            <md-focus-ring></md-focus-ring>
+            <md-icon>@(SortFeld is null ? "sort" : SortAufsteigend ? "arrow_upward" : "arrow_downward")</md-icon>
+            <span>@(SortFeld is { } sf ? $"Sortiert: {DatumsFilter.Anzeige(sf)}" : "Sortieren")</span>
+            <md-icon class="chip-trailing">arrow_drop_down</md-icon>
+        </button>
+        @if (sortMenuOffen)
+        {
+            <div class="menu-scrim" @onclick="() => sortMenuOffen = false"></div>
+            <div class="menu sort-menu" role="menu" aria-label="Sortieren" @onkeydown='e => { if (e.Key == "Escape") sortMenuOffen = false; }'>
+                <div class="menu-title"><md-icon>sort</md-icon>Sortieren nach</div>
+                @SortEintrag(null, "low_priority", "Wichtiges zuerst", "Standard")
+                @foreach (var feld in Enum.GetValues<DatumsFeld>())
+                {
+                    @SortEintrag(feld, DatumsFilter.Symbol(feld), DatumsFilter.Anzeige(feld), null)
+                }
+                @if (SortFeld is { } aktiv)
+                {
+                    <md-divider></md-divider>
+                    @RichtungEintrag(aktiv, true, "arrow_upward", "Aufsteigend", "früheste zuerst")
+                    @RichtungEintrag(aktiv, false, "arrow_downward", "Absteigend", "späteste zuerst")
+                }
+            </div>
+        }
+    </div>
 </div>
 
 @if (tickets is null)
@@ -92,9 +123,9 @@ else
                             }
                         </div>
                         <div class="row-line2">
-                            @if (!string.IsNullOrWhiteSpace(t.Mandant)) { <span>@t.Mandant</span> }
-                            @if (!string.IsNullOrWhiteSpace(t.Umfeld)) { <span>@t.Umfeld</span> }
-                            @if (!string.IsNullOrWhiteSpace(t.Ansprechpartner)) { <span><md-icon>person</md-icon>@t.Ansprechpartner</span> }
+                            @if (!string.IsNullOrWhiteSpace(t.Mandant)) { <span>@Auswahl.Anzeige(t.Mandant)</span> }
+                            @if (!string.IsNullOrWhiteSpace(t.Umfeld)) { <span>@Auswahl.Anzeige(t.Umfeld)</span> }
+                            @if (!string.IsNullOrWhiteSpace(t.Ansprechpartner)) { <span><md-icon>person</md-icon>@Auswahl.Anzeige(t.Ansprechpartner)</span> }
                             @if (t.AufgabenGesamt > 0) { <span class="@(t.AufgabenErledigt == t.AufgabenGesamt ? "tasks-done" : null)"><md-icon>checklist</md-icon>@t.AufgabenErledigt/@t.AufgabenGesamt Tasks</span> }
                             @if (!string.IsNullOrWhiteSpace(t.FeatureBranch)) { <span class="mono"><md-icon>account_tree</md-icon>@t.FeatureBranch</span> }
                             @if (t.Status == TicketStatus.Wartend && !string.IsNullOrWhiteSpace(t.WartetAuf))
@@ -149,11 +180,21 @@ else
     [SupplyParameterFromQuery(Name = "erinnerung")] public string? QErinnerung { get; set; }
     [SupplyParameterFromQuery(Name = "erledigt")] public string? QErledigt { get; set; }
     [SupplyParameterFromQuery(Name = "geaendert")] public string? QGeaendert { get; set; }
+    /// <summary>Sortierung, z. B. „faellig“ (Standardrichtung des Feldes) oder „erhalten-auf“ / „erhalten-ab“.</summary>
+    [SupplyParameterFromQuery(Name = "sort")] public string? QSort { get; set; }
 
     private List<DatumsFilter> AktiveDatumsfilter = new();
 
-    /// <summary>Die Datumsspalte zeigt das Datum des ersten aktiven Filters (sonst „Fällig“).</summary>
-    private DatumsFeld AnzeigeFeld => AktiveDatumsfilter.FirstOrDefault()?.Feld ?? DatumsFeld.Faellig;
+    // ── Sortierung nach Datum (null = Standard: Wichtiges zuerst) ──
+    private DatumsFeld? SortFeld;
+    private bool SortAufsteigend;
+    private bool sortMenuOffen;
+
+    /// <summary>Kommende Termine früheste zuerst, vergangene Ereignisse neueste zuerst.</summary>
+    private static bool StandardAufsteigend(DatumsFeld f) => f is DatumsFeld.Faellig or DatumsFeld.Erinnerung;
+
+    /// <summary>Die Datumsspalte zeigt das Sortierdatum, sonst das des ersten aktiven Filters (sonst „Fällig“).</summary>
+    private DatumsFeld AnzeigeFeld => SortFeld ?? AktiveDatumsfilter.FirstOrDefault()?.Feld ?? DatumsFeld.Faellig;
 
     private DatumsFilter? FilterFuer(DatumsFeld feld) => AktiveDatumsfilter.FirstOrDefault(f => f.Feld == feld);
 
@@ -177,7 +218,56 @@ else
             DatumsFilter.Lesen(DatumsFeld.Erledigt, QErledigt),
             DatumsFilter.Lesen(DatumsFeld.Geaendert, QGeaendert),
         }.OfType<DatumsFilter>().ToList();
+        SortLesen();
     }
+
+    private void SortLesen()
+    {
+        SortFeld = null;
+        var teile = (QSort ?? "").ToLowerInvariant().Split('-');
+        foreach (var f in Enum.GetValues<DatumsFeld>())
+        {
+            if (DatumsFilter.Schluessel(f) != teile[0]) continue;
+            SortFeld = f;
+            SortAufsteigend = teile.Length > 1 ? teile[1] == "auf" : StandardAufsteigend(f);
+        }
+    }
+
+    private void SortSetzen(DatumsFeld? feld, bool? aufsteigend = null)
+    {
+        sortMenuOffen = false;
+        string? wert = null;
+        if (feld is { } f)
+        {
+            var auf = aufsteigend ?? StandardAufsteigend(f);
+            wert = DatumsFilter.Schluessel(f) + (auf == StandardAufsteigend(f) ? "" : auf ? "-auf" : "-ab");
+        }
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("sort", wert));
+    }
+
+    private RenderFragment SortEintrag(DatumsFeld? feld, string icon, string text, string? hinweis) => __builder =>
+    {
+        var an = SortFeld == feld;
+        <button type="button" role="menuitemradio" aria-checked="@(an ? "true" : "false")"
+                class="menu-item @(an ? "selected" : null)" @onclick="() => SortSetzen(feld)">
+            <md-ripple></md-ripple>
+            <md-icon>@(an ? "radio_button_checked" : icon)</md-icon>
+            <span>@text</span>
+            @if (hinweis is not null) { <small>@hinweis</small> }
+        </button>
+    };
+
+    private RenderFragment RichtungEintrag(DatumsFeld feld, bool aufsteigend, string icon, string text, string hinweis) => __builder =>
+    {
+        var an = SortAufsteigend == aufsteigend;
+        <button type="button" role="menuitemradio" aria-checked="@(an ? "true" : "false")"
+                class="menu-item @(an ? "selected" : null)" @onclick="() => SortSetzen(feld, aufsteigend)">
+            <md-ripple></md-ripple>
+            <md-icon>@icon</md-icon>
+            <span>@text</span>
+            <small>@hinweis</small>
+        </button>
+    };
 
     private void DatumsFilterSetzen(DatumsFeld feld, DatumsFilter? neu)
     {
@@ -235,6 +325,16 @@ else
         }
 
         q = q.Where(t => TicketSuche.Passt(t, Suche));
+
+        // Nach Datum sortiert: Tickets ohne dieses Datum ans Ende
+        if (SortFeld is { } sf)
+        {
+            var mitDatum = q.OrderBy(t => DatumsFilter.Wert(t, sf) is null);
+            return (SortAufsteigend
+                    ? mitDatum.ThenBy(t => DatumsFilter.Wert(t, sf))
+                    : mitDatum.ThenByDescending(t => DatumsFilter.Wert(t, sf)))
+                .ThenByDescending(t => t.GeaendertAm);
+        }
 
         // Überfällige & Erinnerungen zuerst, dann nach Fälligkeit, dann zuletzt geändert
         return q.OrderBy(t => t.Erledigt)

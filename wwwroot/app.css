@@ -143,6 +143,8 @@ h1, h2, h3, p { margin: 0; }
 md-icon { flex-shrink: 0; }
 md-icon[data-filled] { font-variation-settings: "FILL" 1; }
 :focus-visible { outline: 2px solid var(--md-sys-color-primary); outline-offset: 2px; }
+/* Blazor setzt nach dem Seitenwechsel den Fokus auf die Überschrift (FocusOnNavigate) – dort kein Rahmen */
+h1:focus-visible { outline: none; }
 .spacer { flex: 1; }
 
 /* Material-Web-Komponenten erst zeigen, wenn sie geladen sind (kein Aufblitzen) */
@@ -479,6 +481,7 @@ md-linear-progress.loading { width: 100%; margin-top: 16px; }
 }
 .filter-chip.date.selected md-icon { color: var(--md-sys-color-on-secondary-container); }
 .chip-trailing { margin-left: -4px; }
+.menu.sort-menu { left: auto; right: 0; }   /* Chip steht rechts → Menü nach links aufklappen */
 .chip-clear {
     display: grid;
     place-items: center;
@@ -546,17 +549,22 @@ md-linear-progress.loading { width: 100%; margin-top: 16px; }
 .menu-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; }
 
 /* ═══ Detailseite ═══════════════════════════════════════════════════ */
-.detail-toolbar {
+/* Kopf mit Werkzeugleiste, Nummer und Betreff bleibt beim Scrollen oben angeheftet */
+.detail-head {
     position: sticky;
     top: 0;
     z-index: 3;
+    margin: 0 -12px;
+    padding: 0 12px 4px;
+    background: var(--app-content);
+    box-shadow: 0 1px 0 var(--row-line);
+}
+.detail-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    margin: 0 -12px;
-    padding: 8px 12px;
-    background: var(--app-content);
+    padding: 8px 0;
 }
 .tno-chip {
     display: inline-flex;
@@ -699,6 +707,72 @@ textarea.m3-input { resize: vertical; }
 }
 .filter-chip.selected md-icon { color: var(--st-on); }
 .assist-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+/* Auswahlfeld (Ansprechpartner, Mandant, Umfeld): Eingabe mit Vervollständigung, gewählte Werte als Chips */
+.auswahl { position: relative; }
+.auswahl-inhalt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; min-width: 0; }
+.auswahl-input {
+    flex: 1;
+    min-width: 8ch;
+    padding: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--md-sys-color-on-surface);
+    caret-color: var(--md-sys-color-primary);
+    font: inherit;
+}
+.auswahl-input::placeholder { color: var(--md-sys-color-on-surface-variant); }
+.auswahl-wert {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 26px;
+    padding: 0 2px 0 10px;
+    border-radius: 8px;
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    font-size: 13px;
+    white-space: nowrap;
+}
+.auswahl-wert.fremd { background: transparent; box-shadow: inset 0 0 0 1px var(--md-sys-color-outline); }
+.auswahl-wert button {
+    display: inline-flex;
+    padding: 2px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    --md-icon-size: 16px;
+}
+.auswahl-wert button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.auswahl-menu { width: 100%; max-height: 384px; overflow-y: auto; }
+.auswahl-menu .menu-item { height: 40px; }
+.auswahl-menu strong { font-weight: 600; }
+.auswahl-einstellungen { justify-self: start; }
+
+/* Einstellungen: Auswahllisten pflegen */
+.einstellungen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.auswahl-liste { list-style: none; margin: 0 0 8px; padding: 0; }
+.auswahl-liste-leer { padding: 0 0 8px; }
+.auswahl-zeile { display: flex; align-items: center; gap: 2px; min-height: 48px; }
+.auswahl-name {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    outline: 0;
+    background: transparent;
+    color: var(--md-sys-color-on-surface);
+    font: inherit;
+}
+.auswahl-name:hover { border-color: var(--md-sys-color-outline-variant); }
+.auswahl-name:focus { border-color: var(--md-sys-color-primary); background: var(--app-content); }
+.auswahl-anzahl { padding: 0 8px; color: var(--md-sys-color-on-surface-variant); font-size: 12px; white-space: nowrap; }
+.auswahl-frage { flex: 1; color: var(--md-sys-color-error); font-size: 13px; }
+.einstellungen-hinweis { margin-top: 16px; max-width: 80ch; line-height: 18px; }
 .assist-chip { color: var(--md-sys-color-on-surface); padding-right: 12px; }
 .assist-chip md-icon { color: var(--md-sys-color-primary); }
 
@@ -1200,6 +1274,13 @@ textarea.m3-input { resize: vertical; }
     line-height: 36px;
     font-weight: 400;
     overflow-wrap: anywhere;
+}
+/* Im angehefteten Kopf: lange Betreffs auf zwei Zeilen kürzen */
+.detail-head .title-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
 }
 .tno-text { padding-right: 6px; font-family: var(--mono); font-size: 13px; color: var(--md-sys-color-on-surface); }
 .tno-chip.editing { border-color: var(--md-sys-color-primary); }

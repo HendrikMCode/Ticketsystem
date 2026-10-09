@@ -4,7 +4,9 @@ WORKDIR /src
 COPY *.csproj ./
 RUN dotnet restore
 COPY . .
-RUN dotnet publish -c Release -o /app/publish --no-restore
+# Ohne --no-restore: Das Paket mit blazor.web.js wird erst erkannt, wenn die .razor-Dateien da sind.
+# Fehlt es, lädt die Seite zwar, reagiert aber auf keinen Klick und speichert nichts.
+RUN dotnet publish -c Release -o /app/publish
 
 # ── 2. Laufzeit ───────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

@@ -27,84 +27,86 @@ else
     <EditForm EditContext="editContext" OnSubmit="JetztSpeichern" class="detail">
         <DataAnnotationsValidator />
 
-        @* ── Werkzeugleiste ─────────────────────────────────────── *@
-        <div class="detail-toolbar">
-            <md-icon-button type="button" title="Zurück zur Übersicht" @onclick='() => Nav.NavigateTo("")'>
-                <md-icon>arrow_back</md-icon>
-            </md-icon-button>
+        @* ── Kopf: Werkzeugleiste mit Nummer + Betreff, bleibt beim Scrollen oben ── *@
+        <div class="detail-head">
+            <div class="detail-toolbar">
+                <md-icon-button type="button" title="Zurück zur Übersicht" @onclick='() => Nav.NavigateTo("")'>
+                    <md-icon>arrow_back</md-icon>
+                </md-icon-button>
 
-            @if (bearbeitenStamm)
-            {
-                <label class="tno-chip editing" title="Ticketnummer">
-                    <md-icon>tag</md-icon>
-                    <InputText class="tno-input" @bind-Value="ticket.Ticketnummer" placeholder="Nummer" />
-                </label>
-            }
-            else
-            {
-                <span class="tno-chip" title="Ticketnummer"><md-icon>tag</md-icon><span class="tno-text">@ticket.Ticketnummer</span></span>
-            }
-            <StatusBadge Status="ticket.Status" />
-            @if (ticket.IstUeberfaellig) { <span class="chip error"><md-icon>event_busy</md-icon>überfällig</span> }
-            @if (ticket.ErinnerungFaellig) { <span class="chip warn"><md-icon>notifications_active</md-icon>Erinnerung fällig</span> }
-
-            <span class="spacer"></span>
-
-            @if (!IstNeu)
-            {
-                if (bearbeitenStamm)
+                @if (bearbeitenStamm)
                 {
-                    <md-filled-tonal-button type="button" title="Titel und Stammdaten wieder schützen" @onclick="StammSperren">
-                        <md-icon slot="icon">lock</md-icon>Fertig
+                    <label class="tno-chip editing" title="Ticketnummer">
+                        <md-icon>tag</md-icon>
+                        <InputText class="tno-input" @bind-Value="ticket.Ticketnummer" placeholder="Nummer" />
+                    </label>
+                }
+                else
+                {
+                    <span class="tno-chip" title="Ticketnummer"><md-icon>tag</md-icon><span class="tno-text">@ticket.Ticketnummer</span></span>
+                }
+                <StatusBadge Status="ticket.Status" />
+                @if (ticket.IstUeberfaellig) { <span class="chip error"><md-icon>event_busy</md-icon>überfällig</span> }
+                @if (ticket.ErinnerungFaellig) { <span class="chip warn"><md-icon>notifications_active</md-icon>Erinnerung fällig</span> }
+
+                <span class="spacer"></span>
+
+                @if (!IstNeu)
+                {
+                    if (bearbeitenStamm)
+                    {
+                        <md-filled-tonal-button type="button" title="Titel und Stammdaten wieder schützen" @onclick="StammSperren">
+                            <md-icon slot="icon">lock</md-icon>Fertig
+                        </md-filled-tonal-button>
+                    }
+                    else
+                    {
+                        <md-outlined-button type="button" title="Titel, Nummer, Ansprechpartner, Mandant, Umfeld und Branch bearbeiten" @onclick="() => bearbeitenStamm = true">
+                            <md-icon slot="icon">edit</md-icon>Bearbeiten
+                        </md-outlined-button>
+                    }
+                    if (loeschenBestaetigen)
+                    {
+                        <span class="confirm-text">Ticket endgültig löschen?</span>
+                        <md-text-button type="button" @onclick="() => loeschenBestaetigen = false">Abbrechen</md-text-button>
+                        <md-filled-button type="button" class="danger" @onclick="Loeschen">
+                            <md-icon slot="icon">delete</md-icon>Löschen
+                        </md-filled-button>
+                    }
+                    else
+                    {
+                        <md-icon-button type="button" title="Ticket löschen" @onclick="() => loeschenBestaetigen = true">
+                            <md-icon>delete</md-icon>
+                        </md-icon-button>
+                    }
+                }
+                @{ var (zIcon, zText, zKlasse) = ZustandAnzeige(); }
+                <span class="save-state @zKlasse" role="status" aria-live="polite"
+                      title="@(zuletztGespeichert is { } zg ? $"Zuletzt gespeichert: {zg:g}" : null)">
+                    <md-icon>@zIcon</md-icon><span>@zText</span>
+                </span>
+                @if (zustand is SpeicherZustand.Fehler or SpeicherZustand.Ungueltig)
+                {
+                    <md-filled-tonal-button type="button" @onclick="JetztSpeichern">
+                        <md-icon slot="icon">refresh</md-icon>Erneut versuchen
                     </md-filled-tonal-button>
                 }
-                else
-                {
-                    <md-outlined-button type="button" title="Titel, Nummer, Ansprechpartner, Mandant, Umfeld und Branch bearbeiten" @onclick="() => bearbeitenStamm = true">
-                        <md-icon slot="icon">edit</md-icon>Bearbeiten
-                    </md-outlined-button>
-                }
-                if (loeschenBestaetigen)
-                {
-                    <span class="confirm-text">Ticket endgültig löschen?</span>
-                    <md-text-button type="button" @onclick="() => loeschenBestaetigen = false">Abbrechen</md-text-button>
-                    <md-filled-button type="button" class="danger" @onclick="Loeschen">
-                        <md-icon slot="icon">delete</md-icon>Löschen
-                    </md-filled-button>
-                }
-                else
-                {
-                    <md-icon-button type="button" title="Ticket löschen" @onclick="() => loeschenBestaetigen = true">
-                        <md-icon>delete</md-icon>
-                    </md-icon-button>
-                }
-            }
-            @{ var (zIcon, zText, zKlasse) = ZustandAnzeige(); }
-            <span class="save-state @zKlasse" role="status" aria-live="polite"
-                  title="@(zuletztGespeichert is { } zg ? $"Zuletzt gespeichert: {zg:g}" : null)">
-                <md-icon>@zIcon</md-icon><span>@zText</span>
-            </span>
-            @if (zustand is SpeicherZustand.Fehler or SpeicherZustand.Ungueltig)
-            {
-                <md-filled-tonal-button type="button" @onclick="JetztSpeichern">
-                    <md-icon slot="icon">refresh</md-icon>Erneut versuchen
-                </md-filled-tonal-button>
-            }
-        </div>
+            </div>
 
-        @* ── Betreff ────────────────────────────────────────────── *@
-        <div class="title-wrap">
-            @if (bearbeitenStamm)
-            {
-                <InputText class="title-input" @bind-Value="ticket.Betreff" placeholder="Betreff" autofocus="@IstNeu" />
-            }
-            else
-            {
-                <h1 class="title-text" title="Zum Ändern oben auf „Bearbeiten“ klicken">@ticket.Betreff</h1>
-            }
-            <ValidationMessage For="() => ticket.Betreff" class="val" />
-            <ValidationMessage For="() => ticket.Ticketnummer" class="val" />
-            @if (fehler is not null) { <div class="val">@fehler</div> }
+            @* ── Betreff ────────────────────────────────────────────── *@
+            <div class="title-wrap">
+                @if (bearbeitenStamm)
+                {
+                    <InputText class="title-input" @bind-Value="ticket.Betreff" placeholder="Betreff" autofocus="@IstNeu" />
+                }
+                else
+                {
+                    <h1 class="title-text" title="Zum Ändern oben auf „Bearbeiten“ klicken">@ticket.Betreff</h1>
+                }
+                <ValidationMessage For="() => ticket.Betreff" class="val" />
+                <ValidationMessage For="() => ticket.Ticketnummer" class="val" />
+                @if (fehler is not null) { <div class="val">@fehler</div> }
+            </div>
         </div>
 
         <div class="detail-grid">
@@ -119,18 +121,19 @@ else
                     @if (bearbeitenStamm)
                     {
                         <div class="fields two">
-                            <MdText Label="Ansprechpartner" Icon="person" Liste="dl-ansprechpartner" @bind-Value="ticket.Ansprechpartner" />
-                            <MdText Label="Mandant" Icon="apartment" Liste="dl-mandanten" @bind-Value="ticket.Mandant" />
-                            <MdText Label="Umfeld" Icon="dns" Liste="dl-umfelder" Placeholder="z. B. Test, Produktion" @bind-Value="ticket.Umfeld" />
+                            <MdAuswahl Label="Ansprechpartner" Icon="person" Placeholder="Name tippen …" Werte="AuswahlFuer(AuswahlFeld.Ansprechpartner)" @bind-Value="ticket.Ansprechpartner" />
+                            <MdAuswahl Label="Mandant" Icon="apartment" Placeholder="Mandant tippen …" Werte="AuswahlFuer(AuswahlFeld.Mandant)" @bind-Value="ticket.Mandant" />
+                            <MdAuswahl Label="Umfeld" Icon="dns" Placeholder="z. B. Test, Produktion" Werte="AuswahlFuer(AuswahlFeld.Umfeld)" @bind-Value="ticket.Umfeld" />
                             <MdText Label="Feature-Branch" Icon="account_tree" Mono Placeholder="feature/…" @bind-Value="ticket.FeatureBranch" />
+                            <a class="pane-link auswahl-einstellungen" href="einstellungen"><md-icon>tune</md-icon>Auswahllisten bearbeiten</a>
                         </div>
                     }
                     else
                     {
                         <dl class="info-list two">
-                            @(Info("person", "Ansprechpartner", ticket.Ansprechpartner))
-                            @(Info("apartment", "Mandant", ticket.Mandant))
-                            @(Info("dns", "Umfeld", ticket.Umfeld))
+                            @(Info("person", "Ansprechpartner", Auswahl.Anzeige(ticket.Ansprechpartner)))
+                            @(Info("apartment", "Mandant", Auswahl.Anzeige(ticket.Mandant)))
+                            @(Info("dns", "Umfeld", Auswahl.Anzeige(ticket.Umfeld)))
                             <div class="info-item">
                                 <md-icon>account_tree</md-icon>
                                 <div>
@@ -435,9 +438,6 @@ else
 
     @if (vorschlaege is not null)
     {
-        <datalist id="dl-ansprechpartner">@foreach (var v in vorschlaege.Ansprechpartner) { <option value="@v"></option> }</datalist>
-        <datalist id="dl-mandanten">@foreach (var v in vorschlaege.Mandanten) { <option value="@v"></option> }</datalist>
-        <datalist id="dl-umfelder">@foreach (var v in vorschlaege.Umfelder) { <option value="@v"></option> }</datalist>
         <datalist id="dl-wartetauf">@foreach (var v in vorschlaege.WartetAuf) { <option value="@v"></option> }</datalist>
     }
 }
@@ -453,6 +453,7 @@ else
     private Ticket? ticket;
     private EditContext? editContext;
     private Vorschlaege? vorschlaege;
+    private List<Auswahlwert> auswahlwerte = [];
     private bool nichtGefunden, speichert, loeschenBestaetigen, composerFokus, erneutSpeichern;
     private string? fehler;
     private SpeicherZustand zustand = SpeicherZustand.Gespeichert;
@@ -514,7 +515,11 @@ else
             zuletztGespeichert = null;
         }
         vorschlaege = await Service.VorschlaegeAsync();
+        auswahlwerte = await Service.AuswahlwerteAsync();
     }
+
+    private List<string> AuswahlFuer(AuswahlFeld feld) =>
+        auswahlwerte.Where(a => a.Feld == feld).Select(a => a.Wert).ToList();
 
     private void SetzeTicket(Ticket t)
     {

@@ -2,11 +2,8 @@ using Ticketsystem.Models;
 
 namespace Ticketsystem.Services;
 
-public record Vorschlaege(
-    IReadOnlyList<string> Mandanten,
-    IReadOnlyList<string> Ansprechpartner,
-    IReadOnlyList<string> Umfelder,
-    IReadOnlyList<string> WartetAuf);
+/// <summary>Vorschläge aus bisherigen Eingaben. Ansprechpartner, Mandant und Umfeld kommen aus den Auswahllisten.</summary>
+public record Vorschlaege(IReadOnlyList<string> WartetAuf);
 
 public interface ITicketService
 {
@@ -34,6 +31,14 @@ public interface ITicketService
     // Bilder (Screenshots in Beschreibung und Schritten)
     Task<int> BildSpeichernAsync(int ticketId, string dateiname, string contentType, byte[] daten);
     Task<Bild?> BildLadenAsync(int id);
+
+    // Auswahllisten für Ansprechpartner, Mandant und Umfeld (Einstellungen)
+    Task<List<Auswahlwert>> AuswahlwerteAsync();
+    Task<Auswahlwert> AuswahlwertHinzufuegenAsync(AuswahlFeld feld, string wert);
+    /// <summary>Benennt einen Wert um und ändert ihn auch in allen Tickets. Liefert die Zahl der geänderten Tickets.</summary>
+    Task<int> AuswahlwertUmbenennenAsync(int id, string neu);
+    Task AuswahlwertLoeschenAsync(int id);
+    Task AuswahlwerteSortierenAsync(AuswahlFeld feld, IReadOnlyList<int> ids);
 
     /// <summary>Wird ausgelöst, wenn sich Tickets ändern (z. B. für den Erinnerungs-Zähler in der Navigation).</summary>
     event Action? Geaendert;

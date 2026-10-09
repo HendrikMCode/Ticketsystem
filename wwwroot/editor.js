@@ -73,6 +73,15 @@
         if (art && !e.shiftKey) { e.preventDefault(); formatieren(textarea, art); }
     });
 
+    // Auswahlfelder (Ansprechpartner, Mandant, Umfeld): Pfeiltasten und Enter steuern die Vorschläge –
+    // kein Springen des Cursors und kein Absenden des Formulars. Blazor bekommt die Taste trotzdem.
+    document.addEventListener('keydown', function (e) {
+        if (e.target && e.target.matches && e.target.matches('input[data-auswahl]')
+            && (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+        }
+    });
+
     // ── Code kopieren ──────────────────────────────────────────
     document.addEventListener('click', function (e) {
         var knopf = e.target && e.target.closest ? e.target.closest('[data-code-kopieren]') : null;

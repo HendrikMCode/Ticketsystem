@@ -89,22 +89,88 @@ public class TicketService(IDbContextFactory<TicketDbContext> factory) : ITicket
     public async Task<Vorschlaege> VorschlaegeAsync()
     {
         await using var db = await factory.CreateDbContextAsync();
-        var t = await db.Tickets.AsNoTracking()
-            .Select(x => new { x.Mandant, x.Ansprechpartner, x.Umfeld, x.WartetAuf })
-            .ToListAsync();
-
-        static List<string> Distinct(IEnumerable<string?> werte, params string[] standard) =>
-            werte.Where(w => !string.IsNullOrWhiteSpace(w)).Select(w => w!.Trim())
-                 .Concat(standard)
-                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                 .Order(StringComparer.CurrentCultureIgnoreCase)
-                 .ToList();
+        var wartetAuf = await db.Tickets.AsNoTracking().Select(x => x.WartetAuf).ToListAsync();
 
         return new Vorschlaege(
-            Distinct(t.Select(x => x.Mandant)),
-            Distinct(t.Select(x => x.Ansprechpartner)),
-            Distinct(t.Select(x => x.Umfeld), "Entwicklung", "Test", "QS", "Produktion"),
-            Distinct(t.Select(x => x.WartetAuf)));
+            wartetAuf.Where(w => !string.IsNullOrWhiteSpace(w)).Select(w => w!.Trim())
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .Order(StringComparer.CurrentCultureIgnoreCase)
+                     .ToList());
+    }
+
+    // ── Auswahllisten ──────────────────────────────────────────
+    public async Task<List<Auswahlwert>> AuswahlwerteAsync()
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.Auswahlwerte.AsNoTracking().OrderBy(a => a.Feld).ThenBy(a => a.Reihenfolge).ToListAsync();
+    }
+
+    public async Task<Auswahlwert> AuswahlwertHinzufuegenAsync(AuswahlFeld feld, string wert)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        wert = await AuswahlwertPruefenAsync(db, feld, wert, ausserId: 0);
+        var max = await db.Auswahlwerte.Where(a => a.Feld == feld).MaxAsync(a => (int?)a.Reihenfolge) ?? 0;
+        var neu = new Auswahlwert { Feld = feld, Wert = wert, Reihenfolge = max + 1 };
+        db.Auswahlwerte.Add(neu);
+        await db.SaveChangesAsync();
+        return neu;
+    }
+
+    public async Task<int> AuswahlwertUmbenennenAsync(int id, string neu)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var eintrag = await db.Auswahlwerte.FirstOrDefaultAsync(a => a.Id == id)
+            ?? throw new InvalidOperationException("Eintrag wurde inzwischen gelöscht.");
+        neu = await AuswahlwertPruefenAsync(db, eintrag.Feld, neu, ausserId: id);
+        var alt = eintrag.Wert;
+        if (alt == neu) return 0;
+        eintrag.Wert = neu;
+
+        // Den Wert auch in allen Tickets umbenennen, in denen er ausgewählt ist
+        var geaendert = 0;
+        foreach (var t in await db.Tickets.ToListAsync())
+        {
+            var werte = Auswahl.Trennen(eintrag.Feld.WertIn(t));
+            var i = werte.FindIndex(w => string.Equals(w, alt, StringComparison.OrdinalIgnoreCase));
+            if (i < 0) continue;
+            werte[i] = neu;
+            eintrag.Feld.SetzenIn(t, Auswahl.Verbinden(werte.Distinct(StringComparer.OrdinalIgnoreCase)));
+            geaendert++;
+        }
+        await db.SaveChangesAsync();
+        if (geaendert > 0) Geaendert?.Invoke();
+        return geaendert;
+    }
+
+    public async Task AuswahlwertLoeschenAsync(int id)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        await db.Auswahlwerte.Where(a => a.Id == id).ExecuteDeleteAsync();
+    }
+
+    public async Task AuswahlwerteSortierenAsync(AuswahlFeld feld, IReadOnlyList<int> ids)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var werte = await db.Auswahlwerte.Where(a => a.Feld == feld).ToListAsync();
+        for (var i = 0; i < ids.Count; i++)
+        {
+            var a = werte.FirstOrDefault(x => x.Id == ids[i]);
+            if (a is not null) a.Reihenfolge = i + 1;
+        }
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Bereinigt den Wert und prüft, ob er erlaubt und noch nicht vorhanden ist.</summary>
+    private static async Task<string> AuswahlwertPruefenAsync(TicketDbContext db, AuswahlFeld feld, string wert, int ausserId)
+    {
+        wert = wert.Trim();
+        if (wert.Length == 0) throw new InvalidOperationException("Bitte einen Namen eingeben.");
+        if (wert.Contains(';')) throw new InvalidOperationException("Das Zeichen „;“ ist nicht erlaubt – es trennt mehrere Werte im Ticket.");
+        if (wert.Length > 200) throw new InvalidOperationException("Höchstens 200 Zeichen.");
+        var vorhanden = await db.Auswahlwerte.Where(a => a.Feld == feld && a.Id != ausserId).Select(a => a.Wert).ToListAsync();
+        if (vorhanden.Contains(wert, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"„{wert}“ ist schon in der Liste.");
+        return wert;
     }
 
     public async Task<Schritt> SchrittHinzufuegenAsync(int ticketId, DateTime datum, string text)
