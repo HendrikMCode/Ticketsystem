@@ -1,0 +1,266 @@
+@page "/"
+@implements IDisposable
+@inject ITicketService Service
+@inject NavigationManager Nav
+
+<PageTitle>@Titel() – Tickets</PageTitle>
+
+<div class="list-head">
+    <div>
+        <h1 class="headline">@Titel()</h1>
+        <p class="supporting">@Untertitel()</p>
+    </div>
+    <md-filled-tonal-button @onclick='() => Nav.NavigateTo("tickets/neu")'>
+        <md-icon slot="icon">add</md-icon>Neues Ticket
+    </md-filled-tonal-button>
+</div>
+
+<div class="filter-bar" role="toolbar" aria-label="Nach Datum filtern">
+    @foreach (var feld in Enum.GetValues<DatumsFeld>())
+    {
+        var f = feld;
+        <DatumsFilterChip Feld="f" Filter="FilterFuer(f)" FilterChanged="neu => DatumsFilterSetzen(f, neu)" />
+    }
+    @if (AktiveDatumsfilter.Count > 0)
+    {
+        <md-text-button @onclick="DatumsfilterEntfernen">Filter löschen</md-text-button>
+    }
+</div>
+
+@if (tickets is null)
+{
+    <md-linear-progress indeterminate class="loading"></md-linear-progress>
+}
+else
+{
+    var liste = Gefiltert().ToList();
+    var ueberfaellig = tickets.Count(t => t.IstUeberfaellig);
+
+    if (filter == "offen" && string.IsNullOrWhiteSpace(Suche) && ueberfaellig > 0)
+    {
+        <div class="banner error">
+            <md-icon>event_busy</md-icon>
+            <span>@(ueberfaellig == 1 ? "1 Ticket ist" : $"{ueberfaellig} Tickets sind") überfällig.</span>
+            <md-text-button @onclick='() => Nav.NavigateTo("?filter=ueberfaellig")'>Anzeigen</md-text-button>
+        </div>
+    }
+
+    if (liste.Count == 0)
+    {
+        <div class="empty">
+            <div class="empty-icon"><md-icon>@(tickets.Count == 0 ? "confirmation_number" : "search_off")</md-icon></div>
+            @if (tickets.Count == 0)
+            {
+                <h2>Noch keine Tickets</h2>
+                <p>Leg dein erstes Ticket an, um loszulegen.</p>
+                <md-filled-button @onclick='() => Nav.NavigateTo("tickets/neu")'>
+                    <md-icon slot="icon">add</md-icon>Erstes Ticket anlegen
+                </md-filled-button>
+            }
+            else
+            {
+                <h2>Keine Tickets gefunden</h2>
+                <p>Kein Ticket passt zu dieser Ansicht, der Suche oder den Datumsfiltern.</p>
+                @if (AktiveDatumsfilter.Count > 0)
+                {
+                    <md-outlined-button @onclick="DatumsfilterEntfernen">Datumsfilter löschen</md-outlined-button>
+                }
+                else
+                {
+                    <md-outlined-button @onclick='() => Nav.NavigateTo("?filter=alle")'>Alle Tickets anzeigen</md-outlined-button>
+                }
+            }
+        </div>
+    }
+    else
+    {
+        <div class="ticket-list" role="list">
+            @foreach (var t in liste)
+            {
+                <a class="ticket-row @(t.Erledigt ? "done" : null)" href="tickets/@t.Id" role="listitem">
+                    <md-ripple></md-ripple>
+                    <md-focus-ring></md-focus-ring>
+                    <span class="row-avatar @t.Status.Css()" title="@t.Status.Anzeige()"><md-icon>@t.Status.Symbol()</md-icon></span>
+
+                    <div class="row-main">
+                        <div class="row-line1">
+                            <span class="tno">@t.Ticketnummer</span>
+                            <span class="subject">@t.Betreff</span>
+                            @if (t.ErinnerungFaellig)
+                            {
+                                <span class="chip warn" title="Erinnerung: @t.Erinnerung?.ToString("g")"><md-icon>notifications_active</md-icon>Erinnerung</span>
+                            }
+                        </div>
+                        <div class="row-line2">
+                            @if (!string.IsNullOrWhiteSpace(t.Mandant)) { <span>@t.Mandant</span> }
+                            @if (!string.IsNullOrWhiteSpace(t.Umfeld)) { <span>@t.Umfeld</span> }
+                            @if (!string.IsNullOrWhiteSpace(t.Ansprechpartner)) { <span><md-icon>person</md-icon>@t.Ansprechpartner</span> }
+                            @if (t.AufgabenGesamt > 0) { <span class="@(t.AufgabenErledigt == t.AufgabenGesamt ? "tasks-done" : null)"><md-icon>checklist</md-icon>@t.AufgabenErledigt/@t.AufgabenGesamt Tasks</span> }
+                            @if (!string.IsNullOrWhiteSpace(t.FeatureBranch)) { <span class="mono"><md-icon>account_tree</md-icon>@t.FeatureBranch</span> }
+                            @if (t.Status == TicketStatus.Wartend && !string.IsNullOrWhiteSpace(t.WartetAuf))
+                            {
+                                <span class="waiting"><md-icon>hourglass_top</md-icon>wartet auf @t.WartetAuf@(t.WartetSeit is { } ws ? $" · seit {Relativ(ws)}" : "")</span>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="row-status"><StatusBadge Status="t.Status" Klein /></div>
+
+                    <div class="row-progress" title="Lokal-Test · Consultant-Test · PR gestellt · Keine Task mehr">
+                        <i class="@(t.LokalTest ? "on" : null)"></i><i class="@(t.ConsultantTest ? "on" : null)"></i><i class="@(t.PrGestellt ? "on" : null)"></i><i class="@(t.KeineTaskMehr ? "on" : null)"></i>
+                    </div>
+
+                    <div class="row-date @(AnzeigeFeld == DatumsFeld.Faellig && t.IstUeberfaellig ? "over" : null)">
+                        @if (AnzeigeFeld != DatumsFeld.Faellig)
+                        {
+                            if (DatumsFilter.Wert(t, AnzeigeFeld) is { } dw)
+                            {
+                                <span>@dw.ToString("dd. MMM")</span><small>@DatumsFilter.Anzeige(AnzeigeFeld)</small>
+                            }
+                            else
+                            {
+                                <span class="none">–</span>
+                            }
+                        }
+                        else if (t.Erledigt && t.ErledigtAm is { } ea)
+                        {
+                            <span>@ea.ToString("dd. MMM")</span><small>erledigt</small>
+                        }
+                        else if (t.Faellig is { } f)
+                        {
+                            <span>@f.ToString("dd. MMM")</span><small>@Relativ(f)</small>
+                        }
+                        else
+                        {
+                            <span class="none">–</span>
+                        }
+                    </div>
+                </a>
+            }
+        </div>
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "filter")] public string? FilterParam { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] public string? Suche { get; set; }
+    [SupplyParameterFromQuery(Name = "erhalten")] public string? QErhalten { get; set; }
+    [SupplyParameterFromQuery(Name = "faellig")] public string? QFaellig { get; set; }
+    [SupplyParameterFromQuery(Name = "erinnerung")] public string? QErinnerung { get; set; }
+    [SupplyParameterFromQuery(Name = "erledigt")] public string? QErledigt { get; set; }
+    [SupplyParameterFromQuery(Name = "geaendert")] public string? QGeaendert { get; set; }
+
+    private List<DatumsFilter> AktiveDatumsfilter = new();
+
+    /// <summary>Die Datumsspalte zeigt das Datum des ersten aktiven Filters (sonst „Fällig“).</summary>
+    private DatumsFeld AnzeigeFeld => AktiveDatumsfilter.FirstOrDefault()?.Feld ?? DatumsFeld.Faellig;
+
+    private DatumsFilter? FilterFuer(DatumsFeld feld) => AktiveDatumsfilter.FirstOrDefault(f => f.Feld == feld);
+
+    private List<Ticket>? tickets;
+    private string filter = "offen";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Service.Geaendert += OnGeaendert;
+        tickets = await Service.AlleAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        filter = string.IsNullOrEmpty(FilterParam) ? "offen" : FilterParam;
+        AktiveDatumsfilter = new[]
+        {
+            DatumsFilter.Lesen(DatumsFeld.Erhalten, QErhalten),
+            DatumsFilter.Lesen(DatumsFeld.Faellig, QFaellig),
+            DatumsFilter.Lesen(DatumsFeld.Erinnerung, QErinnerung),
+            DatumsFilter.Lesen(DatumsFeld.Erledigt, QErledigt),
+            DatumsFilter.Lesen(DatumsFeld.Geaendert, QGeaendert),
+        }.OfType<DatumsFilter>().ToList();
+    }
+
+    private void DatumsFilterSetzen(DatumsFeld feld, DatumsFilter? neu)
+    {
+        var werte = new Dictionary<string, object?> { [DatumsFilter.Schluessel(feld)] = neu?.AlsText() };
+        // „Erledigt am“ ergibt in der Ansicht „Offen“ nie Treffer → auf „Alle Tickets“ wechseln
+        if (feld == DatumsFeld.Erledigt && neu is not null && neu.Preset != DatumsPreset.KeinDatum && filter == "offen")
+            werte["filter"] = "alle";
+        Nav.NavigateTo(Nav.GetUriWithQueryParameters(werte));
+    }
+
+    private void DatumsfilterEntfernen()
+    {
+        var werte = Enum.GetValues<DatumsFeld>().ToDictionary(f => DatumsFilter.Schluessel(f), f => (object?)null);
+        Nav.NavigateTo(Nav.GetUriWithQueryParameters(werte));
+    }
+
+    private string Titel() => filter switch
+    {
+        "offen" => "Offen",
+        "alle" => "Alle Tickets",
+        "ueberfaellig" => "Überfällig",
+        "erinnerung" => "Erinnerungen",
+        _ when Enum.TryParse<TicketStatus>(filter, out var s) => s.Anzeige(),
+        _ => "Tickets",
+    };
+
+    private string Untertitel()
+    {
+        if (tickets is null) return "Wird geladen …";
+        var n = Gefiltert().Count();
+        var text = n == 1 ? "1 Ticket" : $"{n} Tickets";
+        if (!string.IsNullOrWhiteSpace(Suche)) text += $" für „{Suche.Trim()}“";
+        if (AktiveDatumsfilter.Count > 0) text += " · nach Datum gefiltert";
+        return text;
+    }
+
+    private IEnumerable<Ticket> Gefiltert()
+    {
+        IEnumerable<Ticket> q = tickets!;
+
+        q = filter switch
+        {
+            "offen" => q.Where(t => !t.Erledigt),
+            "alle" => q,
+            "ueberfaellig" => q.Where(t => t.IstUeberfaellig),
+            "erinnerung" => q.Where(t => t.ErinnerungFaellig),
+            _ when Enum.TryParse<TicketStatus>(filter, out var s) => q.Where(t => t.Status == s),
+            _ => q,
+        };
+
+        foreach (var df in AktiveDatumsfilter)
+        {
+            var heute = DateTime.Today;
+            q = q.Where(t => df.Passt(t, heute));
+        }
+
+        q = q.Where(t => TicketSuche.Passt(t, Suche));
+
+        // Überfällige & Erinnerungen zuerst, dann nach Fälligkeit, dann zuletzt geändert
+        return q.OrderBy(t => t.Erledigt)
+                .ThenByDescending(t => t.ErinnerungFaellig || t.IstUeberfaellig)
+                .ThenBy(t => t.Faellig ?? DateTime.MaxValue)
+                .ThenByDescending(t => t.GeaendertAm);
+    }
+
+    internal static string Relativ(DateTime d)
+    {
+        var tage = (d.Date - DateTime.Today).Days;
+        return tage switch
+        {
+            0 => "heute",
+            1 => "morgen",
+            -1 => "gestern",
+            > 1 => $"in {tage} Tagen",
+            _ => $"vor {-tage} Tagen",
+        };
+    }
+
+    private void OnGeaendert() => _ = InvokeAsync(async () =>
+    {
+        tickets = await Service.AlleAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Service.Geaendert -= OnGeaendert;
+}

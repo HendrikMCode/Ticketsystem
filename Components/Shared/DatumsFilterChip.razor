@@ -1,0 +1,128 @@
+@* Filter-Chip mit Menü (wie die Filter in Google Drive): Schnellauswahl oder eigener Zeitraum. *@
+
+<div class="date-filter">
+    <button type="button" class="filter-chip date @(Filter is not null ? "selected" : null)"
+            aria-haspopup="menu" aria-expanded="@(offen ? "true" : "false")" @onclick="Umschalten">
+        <md-ripple></md-ripple>
+        <md-focus-ring></md-focus-ring>
+        <md-icon>@(Filter is not null ? "check" : DatumsFilter.Symbol(Feld))</md-icon>
+        <span>@(Filter?.Beschriftung() ?? DatumsFilter.Anzeige(Feld))</span>
+        @if (Filter is not null)
+        {
+            <span class="chip-clear" role="button" title="Filter entfernen" @onclick="Entfernen" @onclick:stopPropagation="true">
+                <md-icon>close</md-icon>
+            </span>
+        }
+        else
+        {
+            <md-icon class="chip-trailing">arrow_drop_down</md-icon>
+        }
+    </button>
+
+    @if (offen)
+    {
+        <div class="menu-scrim" @onclick="Schliessen"></div>
+        <div class="menu" role="menu" aria-label="@DatumsFilter.Anzeige(Feld)" @onkeydown="Taste">
+            <div class="menu-title"><md-icon>@DatumsFilter.Symbol(Feld)</md-icon>@DatumsFilter.Anzeige(Feld)</div>
+
+            @foreach (var p in DatumsFilter.Presets(Feld))
+            {
+                var an = Filter?.Preset == p;
+                <button type="button" role="menuitemradio" aria-checked="@(an ? "true" : "false")"
+                        class="menu-item @(an ? "selected" : null)" @onclick="() => Waehlen(p)">
+                    <md-ripple></md-ripple>
+                    <md-icon>@(an ? "radio_button_checked" : "radio_button_unchecked")</md-icon>
+                    <span>@DatumsFilter.Anzeige(p)</span>
+                    <small>@Hinweis(p)</small>
+                </button>
+            }
+
+            <md-divider></md-divider>
+
+            <div class="menu-range">
+                <div class="menu-sub">Eigener Zeitraum</div>
+                <div class="range-fields">
+                    <md-outlined-field class="m3-field" label="Von" populated focused="@vonFokus">
+                        <input class="m3-input" type="date" value="@von"
+                               @onchange="e => von = e.Value?.ToString() ?? string.Empty"
+                               @onfocus="() => vonFokus = true" @onblur="() => vonFokus = false" />
+                    </md-outlined-field>
+                    <md-outlined-field class="m3-field" label="Bis" populated focused="@bisFokus">
+                        <input class="m3-input" type="date" value="@bis"
+                               @onchange="e => bis = e.Value?.ToString() ?? string.Empty"
+                               @onfocus="() => bisFokus = true" @onblur="() => bisFokus = false" />
+                    </md-outlined-field>
+                </div>
+                <div class="menu-actions">
+                    @if (Filter is not null)
+                    {
+                        <md-text-button @onclick="Entfernen">Entfernen</md-text-button>
+                    }
+                    <md-filled-tonal-button disabled="@(string.IsNullOrEmpty(von) && string.IsNullOrEmpty(bis))" @onclick="ZeitraumUebernehmen">
+                        Übernehmen
+                    </md-filled-tonal-button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DatumsFeld Feld { get; set; }
+    [Parameter] public DatumsFilter? Filter { get; set; }
+    [Parameter] public EventCallback<DatumsFilter?> FilterChanged { get; set; }
+
+    private bool offen, vonFokus, bisFokus;
+    private string von = "", bis = "";
+
+    private void Umschalten()
+    {
+        offen = !offen;
+        if (offen)
+        {
+            // eigenen Zeitraum mit dem aktuellen Filter vorbelegen
+            var (v, b) = Filter?.Bereich(DateTime.Today) ?? (null, null);
+            von = v?.ToString("yyyy-MM-dd") ?? "";
+            bis = b?.ToString("yyyy-MM-dd") ?? "";
+        }
+    }
+
+    private void Schliessen() => offen = false;
+
+    private void Taste(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") offen = false;
+    }
+
+    /// <summary>Zeigt rechts im Menü den konkreten Zeitraum, z. B. „01.10. – 07.10.“.</summary>
+    private string Hinweis(DatumsPreset p)
+    {
+        if (p == DatumsPreset.KeinDatum) return "";
+        var (v, b) = new DatumsFilter(Feld, p).Bereich(DateTime.Today);
+        return v == b ? $"{v:dd.MM.}" : $"{v:dd.MM.} – {b:dd.MM.}";
+    }
+
+    private async Task Waehlen(DatumsPreset p)
+    {
+        offen = false;
+        await FilterChanged.InvokeAsync(new DatumsFilter(Feld, p));
+    }
+
+    private async Task ZeitraumUebernehmen()
+    {
+        static DateTime? D(string s) => DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var d) ? d : null;
+        var v = D(von);
+        var b = D(bis);
+        if (v is null && b is null) return;
+        if (v > b) (v, b) = (b, v);
+        offen = false;
+        await FilterChanged.InvokeAsync(new DatumsFilter(Feld, DatumsPreset.Zeitraum, v, b));
+    }
+
+    private async Task Entfernen()
+    {
+        offen = false;
+        await FilterChanged.InvokeAsync(null);
+    }
+}

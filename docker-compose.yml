@@ -1,0 +1,15 @@
+services:
+  ticketsystem:
+    build: .
+    image: ticketsystem:latest
+    container_name: ticketsystem
+    restart: unless-stopped          # startet automatisch mit Rancher/Docker
+    ports:
+      - "127.0.0.1:5080:8080"        # erreichbar unter http://localhost:5080 (nur von deinem Rechner)
+    environment:
+      - TZ=Europe/Berlin
+    volumes:
+      - ticket-daten:/app/Daten      # Datenbank bleibt bei Updates/Neustarts erhalten
+
+volumes:
+  ticket-daten:

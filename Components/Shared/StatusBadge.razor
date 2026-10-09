@@ -1,0 +1,8 @@
+<span class="m3-status @Status.Css() @(Klein ? "small" : null)">
+    <md-icon>@Status.Symbol()</md-icon>@Status.Anzeige()
+</span>
+
+@code {
+    [Parameter] public TicketStatus Status { get; set; }
+    [Parameter] public bool Klein { get; set; }
+}

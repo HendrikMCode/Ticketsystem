@@ -1,0 +1,57 @@
+@inherits InputBase<string?>
+@* Material-3-Textfeld: <md-outlined-field> aus Material Web mit einem normalen <input>/<textarea> darin.
+   Dadurch funktionieren Blazor-Bindung, Validierung und Vorschlagslisten (datalist) wie gewohnt. *@
+
+<md-outlined-field class="m3-field @(Mono ? "mono" : null)"
+                   label="@Label"
+                   populated="@(!string.IsNullOrEmpty(CurrentValueAsString))"
+                   focused="@fokus"
+                   error="@(Fehler is not null)"
+                   error-text="@Fehler"
+                   supporting-text="@Hinweis"
+                   has-start="@(Icon is not null)">
+    @if (Icon is not null)
+    {
+        <md-icon slot="start">@Icon</md-icon>
+    }
+    @if (Zeilen > 0)
+    {
+        <textarea class="m3-input" rows="@Zeilen" placeholder="@(fokus ? Placeholder : null)"
+                  @attributes="AdditionalAttributes"
+                  value="@CurrentValueAsString"
+                  @oninput="Eingabe" @onfocus="() => fokus = true" @onblur="() => fokus = false"></textarea>
+    }
+    else
+    {
+        <input class="m3-input" type="text" list="@Liste" placeholder="@(fokus ? Placeholder : null)" autocomplete="off"
+               @attributes="AdditionalAttributes"
+               value="@CurrentValueAsString"
+               @oninput="Eingabe" @onfocus="() => fokus = true" @onblur="() => fokus = false" />
+    }
+</md-outlined-field>
+
+@code {
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter] public string? Hinweis { get; set; }
+    /// <summary>Material-Symbol am Anfang des Feldes, z. B. "account_tree".</summary>
+    [Parameter] public string? Icon { get; set; }
+    /// <summary>ID einer &lt;datalist&gt; für Vorschläge.</summary>
+    [Parameter] public string? Liste { get; set; }
+    /// <summary>Größer 0 = mehrzeiliges Textfeld.</summary>
+    [Parameter] public int Zeilen { get; set; }
+    [Parameter] public bool Mono { get; set; }
+
+    private bool fokus;
+
+    private string? Fehler => EditContext?.GetValidationMessages(FieldIdentifier).FirstOrDefault();
+
+    private void Eingabe(ChangeEventArgs e) => CurrentValueAsString = e.Value?.ToString();
+
+    protected override bool TryParseValueFromString(string? value, out string? result, out string validationErrorMessage)
+    {
+        result = string.IsNullOrEmpty(value) ? null : value;
+        validationErrorMessage = "";
+        return true;
+    }
+}

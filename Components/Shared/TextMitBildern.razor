@@ -1,0 +1,9 @@
+@* Zeigt formatierten Text (Markdown) mit Bildern, Code-Blöcken und Links an.
+   Es wird nie HTML aus der Datenbank übernommen – siehe MarkdownRenderer. *@
+
+<div class="text-mit-bildern md @Class">@MarkdownRenderer.Render(Text)</div>
+
+@code {
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

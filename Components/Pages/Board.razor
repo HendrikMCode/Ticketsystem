@@ -1,0 +1,183 @@
+@page "/board"
+@implements IDisposable
+@inject ITicketService Service
+@inject NavigationManager Nav
+
+<PageTitle>Board – Tickets</PageTitle>
+
+<div class="list-head">
+    <div>
+        <h1 class="headline">Board</h1>
+        <p class="supporting">Karten zwischen den Spalten ziehen, um den Status zu ändern@(string.IsNullOrWhiteSpace(Suche) ? "" : $" · Suche: „{Suche.Trim()}“")</p>
+    </div>
+    <div class="head-actions">
+        <button type="button" class="filter-chip date @(alleErledigten ? "selected" : null)" @onclick="() => alleErledigten = !alleErledigten"
+                title="Standardmäßig zeigt die Spalte „Erledigt“ nur die letzten 14 Tage">
+            <md-ripple></md-ripple>
+            <md-icon>@(alleErledigten ? "check" : "history")</md-icon>Alle erledigten
+        </button>
+        <md-filled-tonal-button @onclick='() => Nav.NavigateTo("tickets/neu")'>
+            <md-icon slot="icon">add</md-icon>Neues Ticket
+        </md-filled-tonal-button>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="banner error"><md-icon>error</md-icon><span>@fehler</span></div>
+}
+
+@if (tickets is null)
+{
+    <md-linear-progress indeterminate class="loading"></md-linear-progress>
+}
+else
+{
+    <div class="board">
+        @foreach (var s in Enum.GetValues<TicketStatus>())
+        {
+            var status = s;
+            var (karten, versteckt) = Spalte(status);
+            <section class="board-col @status.Css() @(ueber == status && gezogen is not null && gezogen.Status != status ? "drop-target" : null)"
+                     @ondragenter="() => ueber = status"
+                     @ondragover="() => ueber = status" @ondragover:preventDefault="true"
+                     @ondrop="() => Ablegen(status)" @ondrop:preventDefault="true">
+                <header class="board-col-head">
+                    <span class="col-icon"><md-icon>@status.Symbol()</md-icon></span>
+                    <span class="col-title">@status.Anzeige()</span>
+                    <span class="col-count">@karten.Count</span>
+                </header>
+
+                <div class="board-cards">
+                    @foreach (var t in karten)
+                    {
+                        <a class="board-card @(gezogen?.Id == t.Id ? "dragging" : null) @(t.IstUeberfaellig ? "over" : null)"
+                           href="tickets/@t.Id" draggable="true" data-drag="@t.Id"
+                           @ondragstart="() => gezogen = t" @ondragend="ZiehenBeendet">
+                            <md-ripple></md-ripple>
+                            <div class="card-top">
+                                <span class="tno">@t.Ticketnummer</span>
+                                <span class="spacer"></span>
+                                @if (t.ErinnerungFaellig) { <md-icon class="card-flag warn" title="Erinnerung fällig">notifications_active</md-icon> }
+                                @if (t.IstUeberfaellig) { <md-icon class="card-flag error" title="Überfällig">event_busy</md-icon> }
+                            </div>
+                            <div class="card-title">@t.Betreff</div>
+                            <div class="card-meta">
+                                @if (!string.IsNullOrWhiteSpace(t.Mandant)) { <span class="card-chip">@t.Mandant</span> }
+                                @if (t.Status == TicketStatus.Wartend && !string.IsNullOrWhiteSpace(t.WartetAuf))
+                                {
+                                    <span class="card-wait"><md-icon>hourglass_top</md-icon>@t.WartetAuf</span>
+                                }
+                                @if (t.Faellig is { } f && !t.Erledigt)
+                                {
+                                    <span class="card-due @(t.IstUeberfaellig ? "over" : null)"><md-icon>event</md-icon>@f.ToString("dd. MMM")</span>
+                                }
+                                @if (t.Erledigt && t.ErledigtAm is { } ea)
+                                {
+                                    <span class="card-due"><md-icon>task_alt</md-icon>@ea.ToString("dd. MMM")</span>
+                                }
+                            </div>
+                            @if (t.AufgabenGesamt > 0)
+                            {
+                                <div class="card-tasks" title="@t.AufgabenErledigt von @t.AufgabenGesamt Tasks erledigt">
+                                    <md-icon>checklist</md-icon>
+                                    <span>@t.AufgabenErledigt/@t.AufgabenGesamt</span>
+                                    <span class="task-bar"><i style="width:@(Prozent(t))%"></i></span>
+                                    @if (t.RestaufwandSumme > 0) { <span class="rest">@Stunden(t.RestaufwandSumme) h</span> }
+                                </div>
+                            }
+                        </a>
+                    }
+
+                    @if (karten.Count == 0)
+                    {
+                        <div class="col-empty">@(gezogen is not null ? "Hier ablegen" : "Keine Tickets")</div>
+                    }
+                    @if (versteckt > 0)
+                    {
+                        <button type="button" class="col-more" @onclick="() => alleErledigten = true">
+                            + @versteckt ältere erledigte anzeigen
+                        </button>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? Suche { get; set; }
+
+    private List<Ticket>? tickets;
+    private Ticket? gezogen;
+    private TicketStatus? ueber;
+    private bool alleErledigten;
+    private string? fehler;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Service.Geaendert += OnGeaendert;
+        tickets = await Service.AlleAsync();
+    }
+
+    private (List<Ticket> Karten, int Versteckt) Spalte(TicketStatus status)
+    {
+        var alle = tickets!.Where(t => t.Status == status && TicketSuche.Passt(t, Suche));
+        if (status == TicketStatus.Erledigt)
+        {
+            alle = alle.OrderByDescending(t => t.ErledigtAm ?? t.GeaendertAm).ToList();
+            if (!alleErledigten)
+            {
+                var grenze = DateTime.Today.AddDays(-14);
+                var sichtbar = alle.Where(t => (t.ErledigtAm ?? t.GeaendertAm) >= grenze).ToList();
+                return (sichtbar, alle.Count() - sichtbar.Count);
+            }
+            return (alle.ToList(), 0);
+        }
+        var sortiert = alle
+            .OrderByDescending(t => t.ErinnerungFaellig || t.IstUeberfaellig)
+            .ThenBy(t => t.Faellig ?? DateTime.MaxValue)
+            .ThenByDescending(t => t.GeaendertAm)
+            .ToList();
+        return (sortiert, 0);
+    }
+
+    private async Task Ablegen(TicketStatus ziel)
+    {
+        var t = gezogen;
+        gezogen = null;
+        ueber = null;
+        if (t is null || t.Status == ziel) return;
+
+        var alt = t.Status;
+        t.Status = ziel;   // sofort anzeigen
+        fehler = null;
+        try
+        {
+            await Service.StatusAendernAsync(t.Id, ziel);
+        }
+        catch (Exception ex)
+        {
+            t.Status = alt;
+            fehler = "Status konnte nicht geändert werden: " + ex.Message;
+        }
+    }
+
+    private void ZiehenBeendet()
+    {
+        gezogen = null;
+        ueber = null;
+    }
+
+    private static int Prozent(Ticket t) => t.AufgabenGesamt == 0 ? 0 : t.AufgabenErledigt * 100 / t.AufgabenGesamt;
+
+    internal static string Stunden(double h) => h.ToString(h % 1 == 0 ? "0" : "0.#");
+
+    private void OnGeaendert() => _ = InvokeAsync(async () =>
+    {
+        tickets = await Service.AlleAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Service.Geaendert -= OnGeaendert;
+}

@@ -1,0 +1,12 @@
+@page "/not-found"
+@layout MainLayout
+@inject NavigationManager Nav
+
+<PageTitle>Nicht gefunden – Tickets</PageTitle>
+
+<div class="empty">
+    <div class="empty-icon"><md-icon>explore_off</md-icon></div>
+    <h2>Seite nicht gefunden</h2>
+    <p>Diese Adresse gibt es im Ticketsystem nicht.</p>
+    <md-filled-button @onclick='() => Nav.NavigateTo("")'>Zur Übersicht</md-filled-button>
+</div>

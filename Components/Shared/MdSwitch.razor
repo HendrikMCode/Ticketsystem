@@ -1,0 +1,30 @@
+@inherits InputBase<bool>
+@* Material-3-Schalter (<md-switch>) als Einstellungszeile: Text links, Schalter rechts. *@
+
+<label class="m3-switch-row">
+    @if (Icon is not null)
+    {
+        <md-icon class="m3-switch-icon">@Icon</md-icon>
+    }
+    <span class="m3-switch-text">
+        <span class="m3-switch-label">@Label</span>
+        @if (Hinweis is not null)
+        {
+            <span class="m3-switch-hint">@Hinweis</span>
+        }
+    </span>
+    <md-switch show-only-selected-icon selected="@CurrentValue" @onchange="Umschalten"></md-switch>
+</label>
+
+@code {
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? Hinweis { get; set; }
+    [Parameter] public string? Icon { get; set; }
+
+    // <md-switch> schaltet sich beim Klick selbst um und meldet „change“ –
+    // wir übernehmen den neuen Zustand in Blazor.
+    private void Umschalten() => CurrentValue = !CurrentValue;
+
+    protected override bool TryParseValueFromString(string? value, out bool result, out string validationErrorMessage)
+        => throw new NotSupportedException();
+}

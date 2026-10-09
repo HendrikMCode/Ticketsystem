@@ -1,0 +1,10 @@
+@* Material Symbols (Google Fonts) über <md-icon>. Name = Symbolname, z. B. "inbox", "schedule". *@
+<md-icon class="@Class" style="@(Size is int s ? $"--md-icon-size:{s}px" : null)"
+         data-filled="@(Gefuellt ? "true" : null)">@Name</md-icon>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public int? Size { get; set; }
+    [Parameter] public bool Gefuellt { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

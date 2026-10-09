@@ -1,0 +1,16 @@
+# Build-Ausgaben
+bin/
+obj/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Lokale Daten: Datenbank, Bilder, Sicherungen, Schlüssel – gehören NICHT ins Repository
+Daten/
+*.db
+*.db-shm
+*.db-wal

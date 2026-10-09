@@ -1,0 +1,50 @@
+@using System.Globalization
+@inherits InputBase<DateTime?>
+@* Material-3-Datumsfeld: <md-outlined-field> mit dem Datums-/Zeitwähler des Browsers darin. *@
+
+<md-outlined-field class="m3-field"
+                   label="@Label"
+                   populated
+                   focused="@fokus"
+                   has-end="@Jetzt.HasDelegate">
+    <input class="m3-input" type="@(MitUhrzeit ? "datetime-local" : "date")"
+           @attributes="AdditionalAttributes"
+           value="@CurrentValueAsString"
+           @onchange="Eingabe" @onfocus="() => fokus = true" @onblur="() => fokus = false" />
+    @if (Jetzt.HasDelegate)
+    {
+        <md-icon-button slot="end" type="button" title="Auf jetzt setzen" @onclick="() => Jetzt.InvokeAsync()">
+            <md-icon>schedule</md-icon>
+        </md-icon-button>
+    }
+</md-outlined-field>
+
+@code {
+    [Parameter] public string? Label { get; set; }
+    /// <summary>true = Datum und Uhrzeit, false = nur Datum.</summary>
+    [Parameter] public bool MitUhrzeit { get; set; } = true;
+    /// <summary>Wenn gesetzt, erscheint rechts ein „Jetzt“-Knopf.</summary>
+    [Parameter] public EventCallback Jetzt { get; set; }
+
+    private bool fokus;
+    private string Format => MitUhrzeit ? "yyyy-MM-ddTHH:mm" : "yyyy-MM-dd";
+
+    private void Eingabe(ChangeEventArgs e) => CurrentValueAsString = e.Value?.ToString();
+
+    protected override string? FormatValueAsString(DateTime? value) =>
+        value?.ToString(Format, CultureInfo.InvariantCulture);
+
+    protected override bool TryParseValueFromString(string? value, out DateTime? result, out string validationErrorMessage)
+    {
+        validationErrorMessage = "";
+        if (string.IsNullOrWhiteSpace(value)) { result = null; return true; }
+        if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+        {
+            result = d;
+            return true;
+        }
+        result = null;
+        validationErrorMessage = $"„{value}“ ist kein gültiges Datum.";
+        return false;
+    }
+}

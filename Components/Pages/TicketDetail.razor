@@ -1,0 +1,1044 @@
+@page "/tickets/neu"
+@page "/tickets/{Id:int}"
+@inject ITicketService Service
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>@(ticket is null ? "Ticket" : IstNeu ? "Neues Ticket" : $"{ticket.Ticketnummer} – {ticket.Betreff}") – Tickets</PageTitle>
+
+@if (nichtGefunden)
+{
+    <div class="empty">
+        <div class="empty-icon"><md-icon>search_off</md-icon></div>
+        <h2>Ticket nicht gefunden</h2>
+        <p>Vielleicht wurde es gelöscht.</p>
+        <md-filled-button @onclick='() => Nav.NavigateTo("")'>Zur Übersicht</md-filled-button>
+    </div>
+}
+else if (ticket is null || editContext is null)
+{
+    <md-linear-progress indeterminate class="loading"></md-linear-progress>
+}
+else
+{
+    <NavigationLock OnBeforeInternalNavigation="VorNavigation" ConfirmExternalNavigation="@editContext.IsModified()" />
+
+    <EditForm EditContext="editContext" OnSubmit="JetztSpeichern" class="detail">
+        <DataAnnotationsValidator />
+
+        @* ── Werkzeugleiste ─────────────────────────────────────── *@
+        <div class="detail-toolbar">
+            <md-icon-button type="button" title="Zurück zur Übersicht" @onclick='() => Nav.NavigateTo("")'>
+                <md-icon>arrow_back</md-icon>
+            </md-icon-button>
+
+            @if (bearbeitenStamm)
+            {
+                <label class="tno-chip editing" title="Ticketnummer">
+                    <md-icon>tag</md-icon>
+                    <InputText class="tno-input" @bind-Value="ticket.Ticketnummer" placeholder="Nummer" />
+                </label>
+            }
+            else
+            {
+                <span class="tno-chip" title="Ticketnummer"><md-icon>tag</md-icon><span class="tno-text">@ticket.Ticketnummer</span></span>
+            }
+            <StatusBadge Status="ticket.Status" />
+            @if (ticket.IstUeberfaellig) { <span class="chip error"><md-icon>event_busy</md-icon>überfällig</span> }
+            @if (ticket.ErinnerungFaellig) { <span class="chip warn"><md-icon>notifications_active</md-icon>Erinnerung fällig</span> }
+
+            <span class="spacer"></span>
+
+            @if (!IstNeu)
+            {
+                if (bearbeitenStamm)
+                {
+                    <md-filled-tonal-button type="button" title="Titel und Stammdaten wieder schützen" @onclick="StammSperren">
+                        <md-icon slot="icon">lock</md-icon>Fertig
+                    </md-filled-tonal-button>
+                }
+                else
+                {
+                    <md-outlined-button type="button" title="Titel, Nummer, Ansprechpartner, Mandant, Umfeld und Branch bearbeiten" @onclick="() => bearbeitenStamm = true">
+                        <md-icon slot="icon">edit</md-icon>Bearbeiten
+                    </md-outlined-button>
+                }
+                if (loeschenBestaetigen)
+                {
+                    <span class="confirm-text">Ticket endgültig löschen?</span>
+                    <md-text-button type="button" @onclick="() => loeschenBestaetigen = false">Abbrechen</md-text-button>
+                    <md-filled-button type="button" class="danger" @onclick="Loeschen">
+                        <md-icon slot="icon">delete</md-icon>Löschen
+                    </md-filled-button>
+                }
+                else
+                {
+                    <md-icon-button type="button" title="Ticket löschen" @onclick="() => loeschenBestaetigen = true">
+                        <md-icon>delete</md-icon>
+                    </md-icon-button>
+                }
+            }
+            @{ var (zIcon, zText, zKlasse) = ZustandAnzeige(); }
+            <span class="save-state @zKlasse" role="status" aria-live="polite"
+                  title="@(zuletztGespeichert is { } zg ? $"Zuletzt gespeichert: {zg:g}" : null)">
+                <md-icon>@zIcon</md-icon><span>@zText</span>
+            </span>
+            @if (zustand is SpeicherZustand.Fehler or SpeicherZustand.Ungueltig)
+            {
+                <md-filled-tonal-button type="button" @onclick="JetztSpeichern">
+                    <md-icon slot="icon">refresh</md-icon>Erneut versuchen
+                </md-filled-tonal-button>
+            }
+        </div>
+
+        @* ── Betreff ────────────────────────────────────────────── *@
+        <div class="title-wrap">
+            @if (bearbeitenStamm)
+            {
+                <InputText class="title-input" @bind-Value="ticket.Betreff" placeholder="Betreff" autofocus="@IstNeu" />
+            }
+            else
+            {
+                <h1 class="title-text" title="Zum Ändern oben auf „Bearbeiten“ klicken">@ticket.Betreff</h1>
+            }
+            <ValidationMessage For="() => ticket.Betreff" class="val" />
+            <ValidationMessage For="() => ticket.Ticketnummer" class="val" />
+            @if (fehler is not null) { <div class="val">@fehler</div> }
+        </div>
+
+        <div class="detail-grid">
+            @* ── Linke Spalte ─────────────────────────────────── *@
+            <div class="col">
+                <section class="pane">
+                    <h2 class="pane-title">
+                        <md-icon>info</md-icon>Allgemeine Informationen
+                        <span class="spacer"></span>
+                        @(SperrKnopf(bearbeitenStamm, IstNeu ? null : () => { if (bearbeitenStamm) StammSperren(); else bearbeitenStamm = true; }))
+                    </h2>
+                    @if (bearbeitenStamm)
+                    {
+                        <div class="fields two">
+                            <MdText Label="Ansprechpartner" Icon="person" Liste="dl-ansprechpartner" @bind-Value="ticket.Ansprechpartner" />
+                            <MdText Label="Mandant" Icon="apartment" Liste="dl-mandanten" @bind-Value="ticket.Mandant" />
+                            <MdText Label="Umfeld" Icon="dns" Liste="dl-umfelder" Placeholder="z. B. Test, Produktion" @bind-Value="ticket.Umfeld" />
+                            <MdText Label="Feature-Branch" Icon="account_tree" Mono Placeholder="feature/…" @bind-Value="ticket.FeatureBranch" />
+                        </div>
+                    }
+                    else
+                    {
+                        <dl class="info-list two">
+                            @(Info("person", "Ansprechpartner", ticket.Ansprechpartner))
+                            @(Info("apartment", "Mandant", ticket.Mandant))
+                            @(Info("dns", "Umfeld", ticket.Umfeld))
+                            <div class="info-item">
+                                <md-icon>account_tree</md-icon>
+                                <div>
+                                    <dt>Feature-Branch</dt>
+                                    <dd class="mono">
+                                        @(string.IsNullOrWhiteSpace(ticket.FeatureBranch) ? "–" : ticket.FeatureBranch)
+                                        @if (!string.IsNullOrWhiteSpace(ticket.FeatureBranch))
+                                        {
+                                            <md-icon-button type="button" class="copy-btn" title="@(kopiert ? "Kopiert!" : "Branch-Namen kopieren")" @onclick="BranchKopieren">
+                                                <md-icon>@(kopiert ? "check" : "content_copy")</md-icon>
+                                            </md-icon-button>
+                                        }
+                                    </dd>
+                                </div>
+                            </div>
+                        </dl>
+                    }
+                </section>
+
+                <section class="pane">
+                    <h2 class="pane-title">
+                        <md-icon>description</md-icon>Beschreibung
+                        <span class="spacer"></span>
+                        @if (bearbeitenBeschreibung && !IstNeu)
+                        {
+                            <md-text-button type="button" data-bild-waehlen="#beschreibung-text" title="Bild auswählen und an der Cursorposition einfügen">
+                                <md-icon slot="icon">add_photo_alternate</md-icon>Bild einfügen
+                            </md-text-button>
+                        }
+                        @(SperrKnopf(bearbeitenBeschreibung, IstNeu ? null : () => bearbeitenBeschreibung = !bearbeitenBeschreibung))
+                    </h2>
+                    @if (bearbeitenBeschreibung)
+                    {
+                        <div class="md-toolbar" role="toolbar" aria-label="Formatierung">
+                            @foreach (var (art, icon, titel) in Formatierungen)
+                            {
+                                if (art == "|") { <span class="md-toolbar-sep"></span> continue; }
+                                <md-icon-button type="button" data-md-format="@art" data-md-ziel="#beschreibung-text" title="@titel">
+                                    <md-icon>@icon</md-icon>
+                                </md-icon-button>
+                            }
+                        </div>
+                        <MdText Label="Beschreibung" Zeilen="12" id="beschreibung-text" data-bilder="@ticket.Id" data-markdown
+                                Placeholder="Worum geht es? Anforderungen, Links, Hinweise …"
+                                Hinweis="@(IstNeu ? "Formatierung mit Markdown: **fett**, *kursiv*, `Code`, ```sql … ```, - Liste, - [ ] Aufgabe. Bilder gehen, sobald das Ticket angelegt ist." : "Markdown: **fett**, *kursiv*, `Code`, ```sql … ``` für Codeblöcke, - Liste, - [ ] Aufgabe, > Zitat · Strg+B/I/E/K · Bilder per Strg+V oder Drag & Drop")"
+                                @bind-Value="ticket.Beschreibung" />
+                    }
+                    else if (string.IsNullOrWhiteSpace(ticket.Beschreibung))
+                    {
+                        <button type="button" class="beschreibung-leer" @onclick="() => bearbeitenBeschreibung = true">
+                            <md-icon>edit_note</md-icon>Noch keine Beschreibung – zum Schreiben klicken
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="beschreibung-ansicht" title="Doppelklick zum Bearbeiten" @ondblclick="() => bearbeitenBeschreibung = true">
+                            <TextMitBildern Text="@ticket.Beschreibung" />
+                        </div>
+                    }
+                </section>
+
+                <section class="pane">
+                    <h2 class="pane-title">
+                        <md-icon>checklist</md-icon>Tasks
+                        @if (ticket.AufgabenGesamt > 0)
+                        {
+                            <span class="count">@ticket.AufgabenErledigt/@ticket.AufgabenGesamt</span>
+                        }
+                        @if (ticket.RestaufwandSumme > 0)
+                        {
+                            <span class="count">@Board.Stunden(ticket.RestaufwandSumme) h Rest</span>
+                        }
+                        <span class="spacer"></span>
+                        <a class="pane-link" href="taskboard"><md-icon>view_week</md-icon>Taskboard</a>
+                    </h2>
+
+                    @if (IstNeu)
+                    {
+                        <p class="pane-empty">Tasks kannst du hinzufügen, sobald das Ticket angelegt ist – also sobald ein Betreff eingetragen ist.</p>
+                    }
+                    else
+                    {
+                        <ol class="task-list">
+                            @foreach (var a in ticket.Aufgaben.OrderBy(x => x.Reihenfolge))
+                            {
+                                var aufgabe = a;
+                                <li class="task-row @aufgabe.Status.Css() @(gezogeneAufgabe == aufgabe ? "dragging" : null) @(ueberAufgabe == aufgabe && gezogeneAufgabe is not null && gezogeneAufgabe != aufgabe ? "drop-target" : null)"
+                                    draggable="true" data-drag="@aufgabe.Id"
+                                    @ondragstart="() => gezogeneAufgabe = aufgabe"
+                                    @ondragenter="() => ueberAufgabe = aufgabe"
+                                    @ondragover="() => ueberAufgabe = aufgabe" @ondragover:preventDefault="true"
+                                    @ondrop="() => AufgabeUmsortieren(aufgabe)" @ondrop:preventDefault="true"
+                                    @ondragend="() => { gezogeneAufgabe = null; ueberAufgabe = null; }">
+                                    <md-icon class="drag-handle" title="Ziehen zum Sortieren">drag_indicator</md-icon>
+                                    <button type="button" class="task-state-btn" title="@aufgabe.Status.Anzeige() – klicken für „@aufgabe.Status.Naechster().Anzeige()“"
+                                            @onclick="() => AufgabeStatusSetzen(aufgabe, aufgabe.Status.Naechster())">
+                                        <md-icon>@aufgabe.Status.Symbol()</md-icon>
+                                    </button>
+                                    <input class="task-title-input" value="@aufgabe.Titel" aria-label="Task-Titel"
+                                           @onchange="e => AufgabeTitelAendern(aufgabe, e.Value?.ToString())" />
+                                    @if (aufgabe.Status == AufgabeStatus.InArbeit) { <span class="task-badge">In Arbeit</span> }
+                                    <label class="hours" title="Restaufwand in Stunden">
+                                        <input type="number" min="0" step="0.5" placeholder="–" disabled="@(aufgabe.Status == AufgabeStatus.Erledigt)"
+                                               value="@(aufgabe.RestaufwandStunden?.ToString(System.Globalization.CultureInfo.InvariantCulture))"
+                                               @onchange="e => AufgabeStundenAendern(aufgabe, e.Value?.ToString())" />
+                                        h
+                                    </label>
+                                    <md-icon-button type="button" class="task-del" title="Task löschen" @onclick="() => AufgabeLoeschen(aufgabe)">
+                                        <md-icon>close</md-icon>
+                                    </md-icon-button>
+                                </li>
+                            }
+                        </ol>
+                        <div class="task-add">
+                            <md-icon>add</md-icon>
+                            <input placeholder="Task hinzufügen – Titel eingeben und Enter drücken" aria-label="Neuer Task"
+                                   @bind="neuerTaskTitel" @bind:event="oninput" @onkeydown="TaskTaste" />
+                        </div>
+                    }
+                </section>
+
+                <section class="pane">
+                    <h2 class="pane-title"><md-icon>history</md-icon>Schritte <span class="count">@ticket.Schritte.Count</span></h2>
+
+                    <div class="composer @(composerFokus ? "focused" : null)">
+                        <textarea rows="2" id="schritt-text" data-bilder="@ticket.Id" data-markdown
+                                  placeholder="Was ist passiert? (Strg+Enter zum Hinzufügen, Bilder per Strg+V)"
+                                  @bind="neuerSchrittText" @bind:event="oninput" @onkeydown="SchrittTaste"
+                                  @onfocus="() => composerFokus = true" @onblur="() => composerFokus = false"></textarea>
+                        <div class="composer-bar">
+                            <label class="date-chip" title="Datum des Schritts">
+                                <md-icon>event</md-icon>
+                                <input type="datetime-local" value="@neuerSchrittDatumText"
+                                       @onchange="e => neuerSchrittDatumText = e.Value?.ToString() ?? neuerSchrittDatumText" />
+                            </label>
+                            @if (!IstNeu)
+                            {
+                                <md-icon-button type="button" data-bild-waehlen="#schritt-text" title="Bild einfügen"><md-icon>add_photo_alternate</md-icon></md-icon-button>
+                            }
+                            <span class="spacer"></span>
+                            <md-filled-tonal-button type="button" disabled="@string.IsNullOrWhiteSpace(neuerSchrittText)" @onclick="SchrittHinzufuegen">
+                                <md-icon slot="icon">add_comment</md-icon>Hinzufügen
+                            </md-filled-tonal-button>
+                        </div>
+                    </div>
+
+                    @if (ticket.Schritte.Count == 0)
+                    {
+                        <p class="pane-empty">Noch keine Schritte. Hier kannst du datierte Notizen festhalten.</p>
+                    }
+                    else
+                    {
+                        <ol class="steps">
+                            @foreach (var s in ticket.Schritte.OrderByDescending(x => x.Datum))
+                            {
+                                var st = SchrittStatus(s);
+                                <li class="step @SchrittKlasse(s)">
+                                    <span class="step-avatar"><md-icon>@(st?.Symbol() ?? "edit_note")</md-icon></span>
+                                    @if (s == bearbeiteterSchritt)
+                                    {
+                                        <div class="composer focused step-editor">
+                                            <textarea rows="3" id="schritt-bearbeiten" data-bilder="@ticket.Id" data-markdown @bind="bearbeitenText" @bind:event="oninput" @onkeydown="BearbeitenTaste"
+                                                      aria-label="Schritt bearbeiten" autofocus></textarea>
+                                            <div class="composer-bar">
+                                                <label class="date-chip" title="Datum des Schritts">
+                                                    <md-icon>event</md-icon>
+                                                    <input type="datetime-local" value="@bearbeitenDatumText"
+                                                           @onchange="e => bearbeitenDatumText = e.Value?.ToString() ?? bearbeitenDatumText" />
+                                                </label>
+                                                <span class="spacer"></span>
+                                                <md-text-button type="button" @onclick="BearbeitenAbbrechen">Abbrechen</md-text-button>
+                                                <md-filled-tonal-button type="button" disabled="@string.IsNullOrWhiteSpace(bearbeitenText)" @onclick="BearbeitenSpeichern">
+                                                    <md-icon slot="icon">check</md-icon>Übernehmen
+                                                </md-filled-tonal-button>
+                                            </div>
+                                        </div>
+                                        <span></span>
+                                    }
+                                    else
+                                    {
+                                        <div class="step-content">
+                                            <div class="step-head">
+                                                <strong>@(st is null ? "Notiz" : "Statuswechsel")</strong>
+                                                <span>@s.Datum.ToString("ddd, dd.MM.yyyy · HH:mm")</span>
+                                                @if (s.Id == 0) { <span class="pending-tag">nicht gespeichert</span> }
+                                            </div>
+                                            <TextMitBildern Class="step-text" Text="@s.Text" />
+                                        </div>
+                                        <div class="step-actions">
+                                            @if (st is null)
+                                            {
+                                                <md-icon-button type="button" title="Schritt bearbeiten" @onclick="() => SchrittBearbeiten(s)">
+                                                    <md-icon>edit</md-icon>
+                                                </md-icon-button>
+                                            }
+                                            <md-icon-button type="button" title="Schritt löschen" @onclick="() => SchrittLoeschen(s)">
+                                                <md-icon>delete</md-icon>
+                                            </md-icon-button>
+                                        </div>
+                                    }
+                                </li>
+                            }
+                        </ol>
+                    }
+                </section>
+            </div>
+
+            @* ── Rechte Spalte ────────────────────────────────── *@
+            <div class="col side">
+                <section class="pane tonal">
+                    <h2 class="pane-title"><md-icon>flag</md-icon>Status</h2>
+                    <div class="chip-set">
+                        @foreach (var s in Enum.GetValues<TicketStatus>())
+                        {
+                            var an = ticket.Status == s;
+                            <button type="button" class="filter-chip @s.Css() @(an ? "selected" : null)" @onclick="() => StatusSetzen(s)">
+                                <md-ripple></md-ripple>
+                                <md-focus-ring></md-focus-ring>
+                                <md-icon>@(an ? "check" : s.Symbol())</md-icon>@s.Anzeige()
+                            </button>
+                        }
+                    </div>
+                    <div class="fields @(ticket.Status == TicketStatus.Wartend ? null : "dimmed")">
+                        <MdText Label="Wartet auf" Icon="person_search" Liste="dl-wartetauf" Placeholder="Person / Team / Kunde" @bind-Value="ticket.WartetAuf" />
+                        <MdText Label="Wartegrund" Zeilen="2" Placeholder="Warum geht es nicht weiter?" @bind-Value="ticket.Wartegrund" />
+                        @if (bearbeitenZeiten)
+                        {
+                            <MdDate Label="Wartet seit" @bind-Value="ticket.WartetSeit" Jetzt="() => Setzen(() => ticket.WartetSeit = Jetzt)" />
+                        }
+                        else
+                        {
+                            <dl class="info-list">@(DatumInfo("hourglass_top", "Wartet seit", ticket.WartetSeit, true))</dl>
+                        }
+                    </div>
+                </section>
+
+                <section class="pane tonal">
+                    <h2 class="pane-title">
+                        <md-icon>calendar_month</md-icon>Zeitangaben
+                        <span class="spacer"></span>
+                        @(SperrKnopf(bearbeitenZeiten, IstNeu ? null : () => bearbeitenZeiten = !bearbeitenZeiten))
+                    </h2>
+                    @if (!bearbeitenZeiten)
+                    {
+                        <dl class="info-list">
+                            @(DatumInfo("move_to_inbox", "Aufgabe erhalten", ticket.AufgabeErhalten, true))
+                            @(DatumInfo(ticket.ErinnerungFaellig ? "notifications_active" : "notifications", "Erinnerung", ticket.Erinnerung, true, ticket.ErinnerungFaellig ? "warn" : null))
+                            @(DatumInfo("event", "Fälligkeitsdatum", ticket.Faellig, false, ticket.IstUeberfaellig ? "error" : null))
+                            @(DatumInfo("task_alt", "Erledigt am", ticket.ErledigtAm, true))
+                        </dl>
+                    }
+                    else
+                    {
+                    <div class="fields">
+                        <MdDate Label="Aufgabe erhalten" @bind-Value="ticket.AufgabeErhalten" Jetzt="() => Setzen(() => ticket.AufgabeErhalten = Jetzt)" />
+                        <div>
+                            <MdDate Label="Erinnerung" @bind-Value="ticket.Erinnerung" />
+                            <div class="assist-chips">
+                                <button type="button" class="assist-chip" @onclick="() => Setzen(() => ticket.Erinnerung = DateTime.Now.AddHours(1))"><md-ripple></md-ripple><md-icon>more_time</md-icon>+1 Std.</button>
+                                <button type="button" class="assist-chip" @onclick="() => Setzen(() => ticket.Erinnerung = DateTime.Today.AddDays(1).AddHours(9))"><md-ripple></md-ripple><md-icon>wb_sunny</md-icon>Morgen 9:00</button>
+                                <button type="button" class="assist-chip" @onclick="() => Setzen(() => ticket.Erinnerung = NaechsterMontag())"><md-ripple></md-ripple><md-icon>date_range</md-icon>Mo. 9:00</button>
+                                @if (ticket.Erinnerung is not null)
+                                {
+                                    <button type="button" class="assist-chip" title="Erinnerung entfernen" @onclick="() => Setzen(() => ticket.Erinnerung = null)"><md-ripple></md-ripple><md-icon>notifications_off</md-icon>Entfernen</button>
+                                }
+                            </div>
+                        </div>
+                        <MdDate Label="Fälligkeitsdatum" MitUhrzeit="false" @bind-Value="ticket.Faellig" />
+                        <MdDate Label="Erledigt am" @bind-Value="ticket.ErledigtAm" />
+                    </div>
+                    }
+                </section>
+
+                <section class="pane tonal">
+                    <h2 class="pane-title"><md-icon>checklist</md-icon>Fortschritt</h2>
+                    <div class="switch-group">
+                        <div class="group-label">Tests</div>
+                        <MdSwitch Label="Lokal-Test" Icon="computer" @bind-Value="ticket.LokalTest" />
+                        <MdSwitch Label="Consultant-Test" Icon="groups" @bind-Value="ticket.ConsultantTest" />
+                    </div>
+                    <md-divider></md-divider>
+                    <div class="switch-group">
+                        <div class="group-label">PR-Verwaltung</div>
+                        <MdSwitch Label="PR gestellt" Icon="merge" @bind-Value="ticket.PrGestellt" />
+                        <MdSwitch Label="Keine Task mehr" Icon="playlist_add_check" Hinweis="Automatisch, wenn alle Tasks erledigt sind" @bind-Value="ticket.KeineTaskMehr" />
+                    </div>
+                    <md-divider></md-divider>
+                    <div class="switch-group">
+                        <MdSwitch Label="Erledigt" Icon="task_alt" Hinweis="Setzt Status und „Erledigt am“"
+                                  @bind-Value="ticket.Erledigt" @bind-Value:after="ErledigtGeaendert" />
+                    </div>
+                </section>
+
+                @if (!IstNeu)
+                {
+                    <p class="meta">Angelegt @ticket.ErstelltAm.ToString("g") · geändert @ticket.GeaendertAm.ToString("g")</p>
+                }
+            </div>
+        </div>
+
+    </EditForm>
+
+    @if (vorschlaege is not null)
+    {
+        <datalist id="dl-ansprechpartner">@foreach (var v in vorschlaege.Ansprechpartner) { <option value="@v"></option> }</datalist>
+        <datalist id="dl-mandanten">@foreach (var v in vorschlaege.Mandanten) { <option value="@v"></option> }</datalist>
+        <datalist id="dl-umfelder">@foreach (var v in vorschlaege.Umfelder) { <option value="@v"></option> }</datalist>
+        <datalist id="dl-wartetauf">@foreach (var v in vorschlaege.WartetAuf) { <option value="@v"></option> }</datalist>
+    }
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private enum SpeicherZustand { Gespeichert, Ausstehend, Speichert, BetreffFehlt, Ungueltig, Fehler }
+
+    // Nach so vielen Millisekunden ohne weitere Eingabe wird automatisch gespeichert.
+    private const int AutoSpeichernNachMs = 1000;
+
+    private Ticket? ticket;
+    private EditContext? editContext;
+    private Vorschlaege? vorschlaege;
+    private bool nichtGefunden, speichert, loeschenBestaetigen, composerFokus, erneutSpeichern;
+    private string? fehler;
+    private SpeicherZustand zustand = SpeicherZustand.Gespeichert;
+    private DateTime? zuletztGespeichert;
+    private CancellationTokenSource? autoSpeichernCts;
+    private int aenderungen;   // zählt Änderungen, damit beim Speichern nichts verloren geht
+
+    // Als Text gebunden, damit Blazor beim Tippen nichts umformatiert oder zurücksetzt.
+    private string neuerSchrittDatumText = DatumText(DateTime.Now);
+    private string neuerSchrittText = "";
+    private TicketStatus ursprungsStatus;
+    private const string StatusPraefix = TicketStatusExtensions.SchrittPraefix;
+    private Schritt? offenerStatusSchritt;     // noch nicht gespeicherter Status-Schritt
+    private Schritt? letzterStatusSchritt;     // in dieser Sitzung gespeicherter Status-Schritt (für „Wartet auf“)
+
+    // Bearbeiten-Modus: geschützte Bereiche sind erst nach Klick auf „Bearbeiten“ änderbar
+    private bool bearbeitenStamm, bearbeitenZeiten, bearbeitenBeschreibung, kopiert;
+
+    // Tasks
+    private string neuerTaskTitel = "";
+    private Aufgabe? gezogeneAufgabe, ueberAufgabe;
+
+    // Bearbeiten eines vorhandenen Schritts
+    private Schritt? bearbeiteterSchritt;
+    private string bearbeitenText = "", bearbeitenDatumText = "";
+
+    private bool IstNeu => ticket?.Id is null or 0;
+    private static DateTime Jetzt => new(DateTime.Now.Ticks / TimeSpan.TicksPerMinute * TimeSpan.TicksPerMinute);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Nach dem automatischen Anlegen wechselt nur die Adresse – das Ticket ist schon geladen.
+        if (Id is int gleich && ticket is not null && ticket.Id == gleich) return;
+
+        nichtGefunden = false;
+        fehler = null;
+        loeschenBestaetigen = false;
+        bearbeiteterSchritt = null;
+        autoSpeichernCts?.Cancel();
+
+        if (Id is int id)
+        {
+            var t = await Service.LadenAsync(id);
+            if (t is null) { nichtGefunden = true; return; }
+            SetzeTicket(t);
+            bearbeitenStamm = bearbeitenZeiten = bearbeitenBeschreibung = false;   // bestehende Tickets: geschützt
+            zustand = SpeicherZustand.Gespeichert;
+            zuletztGespeichert = t.GeaendertAm;
+        }
+        else
+        {
+            SetzeTicket(new Ticket
+            {
+                Ticketnummer = await Service.NaechsteNummerAsync(),
+                AufgabeErhalten = Jetzt,
+            });
+            bearbeitenStamm = bearbeitenZeiten = bearbeitenBeschreibung = true;    // neues Ticket: alles offen
+            zustand = SpeicherZustand.BetreffFehlt;
+            zuletztGespeichert = null;
+        }
+        vorschlaege = await Service.VorschlaegeAsync();
+    }
+
+    private void SetzeTicket(Ticket t)
+    {
+        if (editContext is not null) editContext.OnFieldChanged -= FeldGeaendert;
+        ticket = t;
+        editContext = new EditContext(ticket);
+        editContext.OnFieldChanged += FeldGeaendert;
+        ursprungsStatus = t.Status;
+        offenerStatusSchritt = null;
+        letzterStatusSchritt = null;
+        neuerSchrittDatumText = DatumText(Jetzt);
+        neuerSchrittText = "";
+    }
+
+    // ── Auto-Speichern ─────────────────────────────────────────
+    private void FeldGeaendert(object? sender, FieldChangedEventArgs e)
+    {
+        aenderungen++;
+        zustand = SpeicherZustand.Ausstehend;
+        AutoSpeichernPlanen();
+    }
+
+    private void AutoSpeichernPlanen()
+    {
+        autoSpeichernCts?.Cancel();
+        autoSpeichernCts = new CancellationTokenSource();
+        var token = autoSpeichernCts.Token;
+        _ = Task.Delay(AutoSpeichernNachMs, token).ContinueWith(t =>
+        {
+            if (!t.IsCanceled) _ = InvokeAsync(AutoSpeichern);
+        }, TaskScheduler.Default);
+    }
+
+    private async Task AutoSpeichern()
+    {
+        await SpeichernWennNoetig();
+        StateHasChanged();
+    }
+
+    /// <summary>Speichert, wenn es Änderungen gibt und die Eingaben gültig sind. Liefert true, wenn danach alles gespeichert ist.</summary>
+    private async Task<bool> SpeichernWennNoetig()
+    {
+        if (ticket is null || editContext is null) return true;
+        if (!editContext.IsModified()) return true;
+        if (speichert) { erneutSpeichern = true; return false; }
+
+        if (string.IsNullOrWhiteSpace(ticket.Betreff))
+        {
+            // Neues Ticket: still warten, bis ein Betreff da ist. Bestehendes Ticket: Fehler anzeigen.
+            zustand = IstNeu ? SpeicherZustand.BetreffFehlt : SpeicherZustand.Ungueltig;
+            if (!IstNeu) editContext.Validate();
+            return false;
+        }
+        if (!editContext.Validate())
+        {
+            zustand = SpeicherZustand.Ungueltig;
+            return false;
+        }
+
+        var ok = await SpeichernIntern();
+
+        if (erneutSpeichern)
+        {
+            erneutSpeichern = false;
+            if (editContext.IsModified()) AutoSpeichernPlanen();
+        }
+        return ok && !editContext.IsModified();
+    }
+
+    private async Task<bool> SpeichernIntern()
+    {
+        fehler = null;
+        if (await Service.NummerVergebenAsync(ticket!.Ticketnummer.Trim(), ticket.Id))
+        {
+            fehler = $"Die Ticketnummer „{ticket.Ticketnummer}“ ist schon vergeben.";
+            zustand = SpeicherZustand.Ungueltig;
+            return false;
+        }
+
+        var stand = aenderungen;
+        var warNeu = IstNeu;
+        speichert = true;
+        zustand = SpeicherZustand.Speichert;
+        StateHasChanged();
+
+        try
+        {
+            if (offenerStatusSchritt is not null) offenerStatusSchritt.Text = StatusSchrittText(ursprungsStatus, ticket.Status);
+
+            await Service.SpeichernAsync(ticket);
+
+            // Bei bestehenden Tickets die noch offenen Schritte (Status-Schritte) nachträglich speichern
+            if (!warNeu)
+            {
+                foreach (var offen in ticket.Schritte.Where(x => x.Id == 0).ToList())
+                {
+                    var neu = await Service.SchrittHinzufuegenAsync(ticket.Id, offen.Datum, offen.Text);
+                    ticket.Schritte[ticket.Schritte.IndexOf(offen)] = neu;
+                    if (offen == offenerStatusSchritt) letzterStatusSchritt = neu;
+                }
+            }
+            else if (offenerStatusSchritt is not null)
+            {
+                letzterStatusSchritt = offenerStatusSchritt;   // hat beim Anlegen eine Id bekommen
+            }
+
+            // „Wartet auf …“ wird oft erst nach dem Statuswechsel eingetragen → Status-Schritt nachziehen
+            if (offenerStatusSchritt is null && letzterStatusSchritt is { Id: > 0 } letzter
+                && ticket.Status == TicketStatus.Wartend && SchrittStatus(letzter) == TicketStatus.Wartend)
+            {
+                var vorher = letzter.Text.Split('\n')[0];
+                var text = vorher + WarteZusatz();
+                if (text != letzter.Text)
+                {
+                    await Service.SchrittAendernAsync(letzter.Id, letzter.Datum, text);
+                    letzter.Text = text;
+                }
+            }
+
+            ursprungsStatus = ticket.Status;
+            offenerStatusSchritt = null;
+
+            // Nur als gespeichert markieren, wenn während des Speicherns nichts Neues eingegeben wurde
+            if (aenderungen == stand) editContext!.MarkAsUnmodified();
+            zustand = editContext!.IsModified() ? SpeicherZustand.Ausstehend : SpeicherZustand.Gespeichert;
+            zuletztGespeichert = DateTime.Now;
+            vorschlaege = await Service.VorschlaegeAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            fehler = "Speichern fehlgeschlagen: " + ex.Message;
+            zustand = SpeicherZustand.Fehler;
+            return false;
+        }
+        finally
+        {
+            speichert = false;
+            // Neues Ticket wurde angelegt → Adresse auf das Ticket umstellen (ohne neu zu laden)
+            if (warNeu && !IstNeu) Nav.NavigateTo($"tickets/{ticket.Id}", replace: true);
+        }
+    }
+
+    /// <summary>Strg+S, Enter im Formular oder „Erneut versuchen“.</summary>
+    private async Task JetztSpeichern()
+    {
+        autoSpeichernCts?.Cancel();
+        if (editContext is not null && !editContext.IsModified() && zustand == SpeicherZustand.Fehler)
+            editContext.NotifyFieldChanged(new FieldIdentifier(ticket!, nameof(Ticket.Betreff)));
+        await SpeichernWennNoetig();
+    }
+
+    private string StatusSchrittText(TicketStatus von, TicketStatus nach) =>
+        $"{StatusPraefix} {von.Anzeige()} → {nach.Anzeige()}" + (nach == TicketStatus.Wartend ? WarteZusatz() : "");
+
+    private string WarteZusatz() =>
+        string.IsNullOrWhiteSpace(ticket!.WartetAuf) ? "" :
+        $"\nWartet auf {ticket.WartetAuf.Trim()}" + (string.IsNullOrWhiteSpace(ticket.Wartegrund) ? "" : $": {ticket.Wartegrund.Trim()}");
+
+    private (string Icon, string Text, string Klasse) ZustandAnzeige() => zustand switch
+    {
+        SpeicherZustand.Gespeichert when IstNeu => ("edit_note", "Noch nicht angelegt", "muted"),
+        SpeicherZustand.Gespeichert => ("cloud_done", "Gespeichert", "ok"),
+        SpeicherZustand.Ausstehend or SpeicherZustand.Speichert => ("sync", "Wird gespeichert …", "busy"),
+        SpeicherZustand.BetreffFehlt => ("edit_note", "Wird angelegt, sobald ein Betreff eingetragen ist", "muted"),
+        SpeicherZustand.Ungueltig => ("error", "Nicht gespeichert – Eingaben prüfen", "error"),
+        SpeicherZustand.Fehler => ("cloud_off", "Speichern fehlgeschlagen", "error"),
+        _ => ("cloud_done", "", "ok"),
+    };
+
+    // Werkzeugleiste für die Beschreibung („|“ = Trenner)
+    private static readonly (string Art, string Icon, string Titel)[] Formatierungen =
+    [
+        ("heading", "title", "Überschrift"),
+        ("bold", "format_bold", "Fett (Strg+B)"),
+        ("italic", "format_italic", "Kursiv (Strg+I)"),
+        ("strike", "format_strikethrough", "Durchgestrichen"),
+        ("|", "", ""),
+        ("code", "code", "Code im Text (Strg+E)"),
+        ("codeblock", "data_object", "Codeblock (Sprache danach eintragen, z. B. sql, csharp, json)"),
+        ("|", "", ""),
+        ("list", "format_list_bulleted", "Liste"),
+        ("numbered", "format_list_numbered", "Nummerierte Liste"),
+        ("task", "checklist", "Checkliste"),
+        ("quote", "format_quote", "Zitat"),
+        ("link", "link", "Link (Strg+K)"),
+    ];
+
+    // ── Bearbeiten-Modus ───────────────────────────────────────
+    private void StammSperren()
+    {
+        // Nur sperren, wenn Betreff und Nummer gültig sind – sonst kann man den Fehler nicht mehr beheben
+        if (string.IsNullOrWhiteSpace(ticket!.Betreff) || string.IsNullOrWhiteSpace(ticket.Ticketnummer)
+            || (fehler is not null && fehler.Contains("Ticketnummer")))
+        {
+            editContext!.Validate();
+            return;
+        }
+        bearbeitenStamm = false;
+    }
+
+    private async Task BranchKopieren()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", ticket!.FeatureBranch ?? "");
+            kopiert = true;
+            _ = Task.Delay(1500).ContinueWith(_ => InvokeAsync(() => { kopiert = false; StateHasChanged(); }));
+        }
+        catch { /* Zwischenablage nicht verfügbar */ }
+    }
+
+    /// <summary>Stift/Schloss-Knopf im Abschnittstitel. Ohne Aktion (neues Ticket) wird nichts angezeigt.</summary>
+    private RenderFragment SperrKnopf(bool offen, Action? umschalten) => __builder =>
+    {
+        if (umschalten is null) return;
+        <md-icon-button type="button" class="lock-btn @(offen ? "open" : null)"
+                        title="@(offen ? "Fertig – wieder schützen" : "Bearbeiten")" @onclick="umschalten">
+            <md-icon>@(offen ? "lock_open" : "edit")</md-icon>
+        </md-icon-button>
+    };
+
+    private RenderFragment Info(string icon, string label, string? wert) => __builder =>
+    {
+        <div class="info-item">
+            <md-icon>@icon</md-icon>
+            <div>
+                <dt>@label</dt>
+                <dd class="@(string.IsNullOrWhiteSpace(wert) ? "leer" : null)">@(string.IsNullOrWhiteSpace(wert) ? "–" : wert)</dd>
+            </div>
+        </div>
+    };
+
+    private RenderFragment DatumInfo(string icon, string label, DateTime? wert, bool mitUhrzeit, string? klasse = null) => __builder =>
+    {
+        <div class="info-item @klasse">
+            <md-icon>@icon</md-icon>
+            <div>
+                <dt>@label</dt>
+                @if (wert is { } d)
+                {
+                    <dd>
+                        @d.ToString(mitUhrzeit ? "ddd, dd.MM.yyyy · HH:mm" : "ddd, dd.MM.yyyy")
+                        <small>@Uebersicht.Relativ(d)</small>
+                    </dd>
+                }
+                else
+                {
+                    <dd class="leer">–</dd>
+                }
+            </div>
+        </div>
+    };
+
+    // ── Hilfen ─────────────────────────────────────────────────
+    private static string DatumText(DateTime d) =>
+        d.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static DateTime TextAlsDatum(string text) =>
+        DateTime.TryParse(text, System.Globalization.CultureInfo.InvariantCulture,
+                          System.Globalization.DateTimeStyles.None, out var d) ? d : DateTime.Now;
+
+    private static bool IstStatusSchritt(Schritt s) => s.Text.StartsWith(StatusPraefix);
+
+    /// <summary>Liest den Zielstatus aus „Status geändert: A → B“.</summary>
+    private static TicketStatus? SchrittStatus(Schritt s)
+    {
+        if (!IstStatusSchritt(s)) return null;
+        var ersteZeile = s.Text.Split('\n')[0];
+        var ziel = ersteZeile[(ersteZeile.LastIndexOf('→') + 1)..].Trim();
+        foreach (var st in Enum.GetValues<TicketStatus>())
+            if (st.Anzeige() == ziel) return st;
+        return null;
+    }
+
+    private static string SchrittKlasse(Schritt s)
+    {
+        var klasse = SchrittStatus(s) is { } st ? $"status-step {st.Css()}" : "";
+        return s.Id == 0 ? klasse + " pending" : klasse;
+    }
+
+    /// <summary>Legt beim Statuswechsel sofort einen Schritt an (bzw. aktualisiert den noch ungespeicherten).</summary>
+    private void StatusSchrittAktualisieren()
+    {
+        if (ticket!.Status == ursprungsStatus)
+        {
+            // zurück zum ursprünglichen Status → Schritt wieder entfernen
+            if (offenerStatusSchritt is not null) ticket.Schritte.Remove(offenerStatusSchritt);
+            offenerStatusSchritt = null;
+            return;
+        }
+
+        var text = StatusSchrittText(ursprungsStatus, ticket.Status);
+        if (offenerStatusSchritt is null)
+        {
+            offenerStatusSchritt = new Schritt { Datum = DateTime.Now, Text = text };
+            ticket.Schritte.Add(offenerStatusSchritt);
+        }
+        else
+        {
+            offenerStatusSchritt.Text = text;
+            offenerStatusSchritt.Datum = DateTime.Now;
+        }
+        Aendern(nameof(Ticket.Schritte));
+    }
+
+    // ── Automatiken ────────────────────────────────────────────
+    private void StatusSetzen(TicketStatus s)
+    {
+        ticket!.Status = s;
+        if (s == TicketStatus.Wartend && ticket.WartetSeit is null) ticket.WartetSeit = Jetzt;
+        if (s == TicketStatus.Erledigt)
+        {
+            ticket.Erledigt = true;
+            ticket.ErledigtAm ??= Jetzt;
+        }
+        else if (ticket.Erledigt)
+        {
+            ticket.Erledigt = false;
+            ticket.ErledigtAm = null;
+        }
+        Aendern(nameof(Ticket.Status));
+        StatusSchrittAktualisieren();
+    }
+
+    private void ErledigtGeaendert()
+    {
+        if (ticket!.Erledigt)
+        {
+            ticket.Status = TicketStatus.Erledigt;
+            ticket.ErledigtAm ??= Jetzt;
+        }
+        else
+        {
+            ticket.ErledigtAm = null;
+            if (ticket.Status == TicketStatus.Erledigt) ticket.Status = TicketStatus.InArbeit;
+        }
+        StatusSchrittAktualisieren();
+    }
+
+    private void Setzen(Action a)
+    {
+        a();
+        Aendern(nameof(Ticket.GeaendertAm));
+    }
+
+    private void Aendern(string feld) =>
+        editContext!.NotifyFieldChanged(new FieldIdentifier(ticket!, feld));
+
+    private static DateTime NaechsterMontag()
+    {
+        var d = DateTime.Today.AddDays(1);
+        while (d.DayOfWeek != DayOfWeek.Monday) d = d.AddDays(1);
+        return d.AddHours(9);
+    }
+
+    private async Task Loeschen()
+    {
+        autoSpeichernCts?.Cancel();
+        await Service.LoeschenAsync(ticket!.Id);
+        editContext!.MarkAsUnmodified();
+        Nav.NavigateTo("");
+    }
+
+    // ── Schritte ───────────────────────────────────────────────
+    private async Task SchrittHinzufuegen()
+    {
+        if (string.IsNullOrWhiteSpace(neuerSchrittText)) return;
+
+        if (IstNeu)
+        {
+            // Bei neuen Tickets erst im Speicher halten – wird mit dem Ticket gespeichert.
+            ticket!.Schritte.Add(new Schritt { Datum = TextAlsDatum(neuerSchrittDatumText), Text = neuerSchrittText.Trim() });
+            Aendern(nameof(Ticket.Schritte));
+        }
+        else
+        {
+            var s = await Service.SchrittHinzufuegenAsync(ticket!.Id, TextAlsDatum(neuerSchrittDatumText), neuerSchrittText);
+            ticket.Schritte.Add(s);
+        }
+
+        neuerSchrittText = "";
+        neuerSchrittDatumText = DatumText(Jetzt);
+    }
+
+    private async Task SchrittTaste(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey)) await SchrittHinzufuegen();
+    }
+
+    private async Task SchrittLoeschen(Schritt s)
+    {
+        if (!IstNeu && s.Id != 0) await Service.SchrittLoeschenAsync(s.Id);
+        if (s == offenerStatusSchritt) offenerStatusSchritt = null;
+        if (s == letzterStatusSchritt) letzterStatusSchritt = null;
+        if (s == bearbeiteterSchritt) bearbeiteterSchritt = null;
+        ticket!.Schritte.Remove(s);
+    }
+
+    private void SchrittBearbeiten(Schritt s)
+    {
+        bearbeiteterSchritt = s;
+        bearbeitenText = s.Text;
+        bearbeitenDatumText = DatumText(s.Datum);
+    }
+
+    private void BearbeitenAbbrechen() => bearbeiteterSchritt = null;
+
+    private async Task BearbeitenSpeichern()
+    {
+        var s = bearbeiteterSchritt;
+        if (s is null || string.IsNullOrWhiteSpace(bearbeitenText)) return;
+        var datum = TextAlsDatum(bearbeitenDatumText);
+        var text = bearbeitenText.Trim();
+
+        if (s.Id != 0)
+        {
+            await Service.SchrittAendernAsync(s.Id, datum, text);
+        }
+        else
+        {
+            Aendern(nameof(Ticket.Schritte));   // gehört zu einem noch nicht angelegten Ticket
+        }
+        s.Datum = datum;
+        s.Text = text;
+        bearbeiteterSchritt = null;
+    }
+
+    private async Task BearbeitenTaste(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey)) await BearbeitenSpeichern();
+        else if (e.Key == "Escape") BearbeitenAbbrechen();
+    }
+
+    // ── Tasks (werden sofort gespeichert) ──────────────────────
+    // Die Service-Methoden liefern den neuen Wert von „Keine Task mehr“ – den übernehmen wir,
+    // ohne ihn als Änderung zu markieren (sonst würde das Auto-Speichern ihn wieder überschreiben).
+    private async Task TaskTaste(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || string.IsNullOrWhiteSpace(neuerTaskTitel) || IstNeu) return;
+        var titel = neuerTaskTitel;
+        neuerTaskTitel = "";
+        await TaskAktion(async () =>
+        {
+            var (aufgabe, keineTaskMehr) = await Service.AufgabeHinzufuegenAsync(ticket!.Id, titel);
+            ticket.Aufgaben.Add(aufgabe);
+            return keineTaskMehr;
+        });
+    }
+
+    private Task AufgabeStatusSetzen(Aufgabe a, AufgabeStatus ziel) => TaskAktion(async () =>
+    {
+        a.Status = ziel;
+        return await Service.AufgabeAendernAsync(a);
+    });
+
+    private Task AufgabeTitelAendern(Aufgabe a, string? titel)
+    {
+        if (string.IsNullOrWhiteSpace(titel) || titel.Trim() == a.Titel) return Task.CompletedTask;
+        return TaskAktion(async () =>
+        {
+            a.Titel = titel.Trim();
+            return await Service.AufgabeAendernAsync(a);
+        });
+    }
+
+    private Task AufgabeStundenAendern(Aufgabe a, string? text) => TaskAktion(async () =>
+    {
+        a.RestaufwandStunden = Taskboard.StundenLesen(text);
+        return await Service.AufgabeAendernAsync(a);
+    });
+
+    private Task AufgabeLoeschen(Aufgabe a) => TaskAktion(async () =>
+    {
+        var keineTaskMehr = await Service.AufgabeLoeschenAsync(a.Id);
+        ticket!.Aufgaben.Remove(a);
+        return keineTaskMehr;
+    });
+
+    private async Task AufgabeUmsortieren(Aufgabe ziel)
+    {
+        var quelle = gezogeneAufgabe;
+        gezogeneAufgabe = null;
+        ueberAufgabe = null;
+        if (quelle is null || quelle == ziel) return;
+
+        var liste = ticket!.Aufgaben.OrderBy(x => x.Reihenfolge).ToList();
+        var nachUnten = liste.IndexOf(quelle) < liste.IndexOf(ziel);
+        liste.Remove(quelle);
+        liste.Insert(liste.IndexOf(ziel) + (nachUnten ? 1 : 0), quelle);
+        for (var i = 0; i < liste.Count; i++) liste[i].Reihenfolge = i + 1;
+        await Service.AufgabenSortierenAsync(ticket.Id, liste.Select(x => x.Id).ToList());
+    }
+
+    private async Task TaskAktion(Func<Task<bool>> aktion)
+    {
+        try
+        {
+            var keineTaskMehr = await aktion();
+            ticket!.KeineTaskMehr = keineTaskMehr;
+        }
+        catch (Exception ex)
+        {
+            fehler = "Task konnte nicht gespeichert werden: " + ex.Message;
+        }
+    }
+
+    // ── Seite verlassen: vorher speichern ──────────────────────
+    private async Task VorNavigation(LocationChangingContext ctx)
+    {
+        if (ticket is not null && !IstNeu && ctx.TargetLocation.EndsWith($"tickets/{ticket.Id}")) return;
+        if (editContext?.IsModified() != true) return;
+
+        autoSpeichernCts?.Cancel();
+        if (await SpeichernWennNoetig()) return;
+
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Die letzten Änderungen konnten nicht gespeichert werden (z. B. fehlt der Betreff). Trotzdem verlassen?");
+        if (!ok) ctx.PreventNavigation();
+    }
+
+    public void Dispose()
+    {
+        autoSpeichernCts?.Cancel();
+        if (editContext is not null) editContext.OnFieldChanged -= FeldGeaendert;
+    }
+}

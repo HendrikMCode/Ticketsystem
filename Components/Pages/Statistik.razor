@@ -1,0 +1,454 @@
+@page "/statistik"
+@using System.Globalization
+@implements IDisposable
+@inject ITicketService Service
+
+<PageTitle>Statistik – Tickets</PageTitle>
+
+<div class="list-head">
+    <div>
+        <h1 class="headline">Statistik</h1>
+        <p class="supporting">@ZeitraumText()</p>
+    </div>
+</div>
+
+<div class="filter-bar" role="toolbar" aria-label="Zeitraum">
+    @foreach (var (tage, text) in Zeitraeume)
+    {
+        var t = tage;
+        <button type="button" class="filter-chip date @(zeitraumTage == t ? "selected" : null)" @onclick="() => zeitraumTage = t">
+            <md-ripple></md-ripple>
+            @if (zeitraumTage == t) { <md-icon>check</md-icon> }
+            @text
+        </button>
+    }
+</div>
+
+@if (tickets is null)
+{
+    <md-linear-progress indeterminate class="loading"></md-linear-progress>
+}
+else
+{
+    var s = Berechnen();
+
+    @* ── Kennzahlen ───────────────────────────────────────── *@
+    <section class="kpi-row">
+        <div class="kpi">
+            <span class="kpi-label">Offen</span>
+            <span class="kpi-value">@s.Offen</span>
+            <span class="kpi-sub @(s.Ueberfaellig > 0 ? "bad" : null)">@(s.Ueberfaellig > 0 ? $"davon {s.Ueberfaellig} überfällig" : "nichts überfällig")</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Erledigt</span>
+            <span class="kpi-value">@s.Erledigt</span>
+            @if (s.ErledigtVorher is int vorher)
+            {
+                var diff = s.Erledigt - vorher;
+                <span class="kpi-sub @(diff > 0 ? "good" : diff < 0 ? "bad" : null)">
+                    @(diff > 0 ? "▲ +" + diff : diff < 0 ? "▼ " + diff : "± 0") ggü. vorherigem Zeitraum
+                </span>
+            }
+            else
+            {
+                <span class="kpi-sub">im Zeitraum</span>
+            }
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Neu</span>
+            <span class="kpi-value">@s.Neu</span>
+            <span class="kpi-sub">erhalten im Zeitraum</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Durchlaufzeit (Median)</span>
+            <span class="kpi-value">@(s.MedianTage is double m ? Tage(m) : "–")</span>
+            <span class="kpi-sub">@(s.MittelTage is double mt ? $"Ø {Tage(mt)} · Erhalten bis Erledigt" : "noch keine erledigten Tickets")</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Tasks erledigt</span>
+            <span class="kpi-value">@s.TasksErledigt</span>
+            <span class="kpi-sub">@s.TasksOffen offen</span>
+        </div>
+    </section>
+
+    <div class="viz-grid">
+        @* ── Neu und erledigt im Verlauf ────────────────────── *@
+        <section class="viz-card wide">
+            <header class="viz-head">
+                <div>
+                    <h2>Neu und erledigt pro @(s.ProMonat ? "Monat" : "Woche")</h2>
+                    <p>Eingang (Aufgabe erhalten) und Abschluss (Erledigt am)</p>
+                </div>
+                <div class="viz-legend">
+                    <span><i class="key viz-1"></i>Neu</span>
+                    <span><i class="key viz-2"></i>Erledigt</span>
+                </div>
+            </header>
+            @{ var maxVerlauf = SchoenesMaximum(s.Verlauf.Count == 0 ? 0 : s.Verlauf.Max(v => Math.Max(v.Neu, v.Erledigt))); }
+            <div class="viz-columns" style="--spalten:@s.Verlauf.Count">
+                <div class="viz-yaxis">
+                    @foreach (var tick in new[] { maxVerlauf, maxVerlauf / 2, 0 })
+                    {
+                        <span>@tick</span>
+                    }
+                </div>
+                <div class="viz-plot">
+                    <i class="viz-grid-line" style="bottom:100%"></i>
+                    <i class="viz-grid-line" style="bottom:50%"></i>
+                    <i class="viz-grid-line base" style="bottom:0"></i>
+                    @for (var i = 0; i < s.Verlauf.Count; i++)
+                    {
+                        var v = s.Verlauf[i];
+                        <div class="viz-group" tabindex="0" data-tip="@v.Label: @v.Neu neu · @v.Erledigt erledigt">
+                            <i class="viz-col viz-1" style="height:@Prozent(v.Neu, maxVerlauf)"></i>
+                            <i class="viz-col viz-2" style="height:@Prozent(v.Erledigt, maxVerlauf)"></i>
+                        </div>
+                    }
+                </div>
+                <div></div>
+                <div class="viz-xaxis">
+                    @for (var i = 0; i < s.Verlauf.Count; i++)
+                    {
+                        <span>@(ZeigeLabel(i, s.Verlauf.Count) ? s.Verlauf[i].Label : "")</span>
+                    }
+                </div>
+            </div>
+            <details class="viz-table">
+                <summary>Als Tabelle</summary>
+                <table>
+                    <thead><tr><th>@(s.ProMonat ? "Monat" : "Woche")</th><th>Neu</th><th>Erledigt</th></tr></thead>
+                    <tbody>
+                        @foreach (var v in s.Verlauf)
+                        {
+                            <tr><td>@v.Label</td><td>@v.Neu</td><td>@v.Erledigt</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </details>
+        </section>
+
+        @* ── Offen nach Status ─────────────────────────────── *@
+        <section class="viz-card">
+            <header class="viz-head">
+                <div>
+                    <h2>Offene Tickets nach Status</h2>
+                    <p>Aktueller Stand</p>
+                </div>
+            </header>
+            @{ var maxStatus = Math.Max(1, s.ProStatus.Count == 0 ? 1 : s.ProStatus.Max(x => x.Anzahl)); }
+            <div class="viz-bars">
+                @foreach (var (status, anzahl) in s.ProStatus)
+                {
+                    <div class="viz-bar-row" tabindex="0" data-tip="@status.Anzeige(): @anzahl">
+                        <span class="viz-bar-label"><md-icon class="@status.Css()">@status.Symbol()</md-icon>@status.Anzeige()</span>
+                        <span class="viz-track"><i class="viz-bar @status.Css()" style="width:@Prozent(anzahl, maxStatus)"></i></span>
+                        <span class="viz-bar-value">@anzahl</span>
+                    </div>
+                }
+            </div>
+        </section>
+
+        @* ── Zeit je Status ───────────────────────────────── *@
+        <section class="viz-card">
+            <header class="viz-head">
+                <div>
+                    <h2>Ø Tage je Status</h2>
+                    <p>Wie lange Tickets in einem Status bleiben (aus den Status-Schritten)</p>
+                </div>
+            </header>
+            @if (s.ZeitJeStatus.Count == 0)
+            {
+                <p class="viz-empty">Noch keine Statuswechsel im Zeitraum.</p>
+            }
+            else
+            {
+                var maxZeit = s.ZeitJeStatus.Max(x => x.Tage);
+                <div class="viz-bars">
+                    @foreach (var (status, tage, anzahl) in s.ZeitJeStatus)
+                    {
+                        <div class="viz-bar-row" tabindex="0" data-tip="@status.Anzeige(): Ø @Tage(tage) (@anzahl×)">
+                            <span class="viz-bar-label"><md-icon class="@status.Css()">@status.Symbol()</md-icon>@status.Anzeige()</span>
+                            <span class="viz-track"><i class="viz-bar viz-1" style="width:@Prozent(tage, maxZeit)"></i></span>
+                            <span class="viz-bar-value">@Tage(tage)</span>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        @* ── Verteilung der Durchlaufzeit ───────────────────── *@
+        <section class="viz-card">
+            <header class="viz-head">
+                <div>
+                    <h2>Durchlaufzeit erledigter Tickets</h2>
+                    <p>Anzahl Tickets je Dauer von „Erhalten“ bis „Erledigt“</p>
+                </div>
+            </header>
+            @if (s.Erledigt == 0)
+            {
+                <p class="viz-empty">Im Zeitraum wurde noch nichts erledigt.</p>
+            }
+            else
+            {
+                var maxVert = SchoenesMaximum(s.Verteilung.Max(x => x.Anzahl));
+                <div class="viz-columns compact" style="--spalten:@s.Verteilung.Count">
+                    <div class="viz-yaxis"><span>@maxVert</span><span>@(maxVert / 2)</span><span>0</span></div>
+                    <div class="viz-plot">
+                        <i class="viz-grid-line" style="bottom:100%"></i>
+                        <i class="viz-grid-line" style="bottom:50%"></i>
+                        <i class="viz-grid-line base" style="bottom:0"></i>
+                        @foreach (var (label, anzahl) in s.Verteilung)
+                        {
+                            <div class="viz-group single" tabindex="0" data-tip="@label: @anzahl Tickets">
+                                <i class="viz-col viz-1" style="height:@Prozent(anzahl, maxVert)">
+                                    @if (anzahl > 0) { <b class="viz-cap">@anzahl</b> }
+                                </i>
+                            </div>
+                        }
+                    </div>
+                    <div></div>
+                    <div class="viz-xaxis">
+                        @foreach (var (label, _) in s.Verteilung) { <span>@label</span> }
+                    </div>
+                </div>
+            }
+        </section>
+
+        @* ── Tickets je Mandant ─────────────────────────────── *@
+        <section class="viz-card">
+            <header class="viz-head">
+                <div>
+                    <h2>Tickets je Mandant</h2>
+                    <p>Im Zeitraum erhalten · Top 8</p>
+                </div>
+                <div class="viz-legend">
+                    <span><i class="key viz-1"></i>Offen</span>
+                    <span><i class="key viz-2"></i>Erledigt</span>
+                </div>
+            </header>
+            @if (s.Mandanten.Count == 0)
+            {
+                <p class="viz-empty">Keine Tickets im Zeitraum.</p>
+            }
+            else
+            {
+                var maxMandant = s.Mandanten.Max(x => x.Offen + x.Erledigt);
+                <div class="viz-bars">
+                    @foreach (var mandant in s.Mandanten)
+                    {
+                        <div class="viz-bar-row" tabindex="0" data-tip="@mandant.Name: @mandant.Offen offen · @mandant.Erledigt erledigt">
+                            <span class="viz-bar-label" title="@mandant.Name">@mandant.Name</span>
+                            <span class="viz-track stacked">
+                                @if (mandant.Offen > 0) { <i class="viz-bar viz-1" style="width:@Prozent(mandant.Offen, maxMandant)"></i> }
+                                @if (mandant.Erledigt > 0) { <i class="viz-bar viz-2" style="width:@Prozent(mandant.Erledigt, maxMandant)"></i> }
+                            </span>
+                            <span class="viz-bar-value">@(mandant.Offen + mandant.Erledigt)</span>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        @* ── Am längsten wartend ────────────────────────────── *@
+        <section class="viz-card">
+            <header class="viz-head">
+                <div>
+                    <h2>Am längsten wartend</h2>
+                    <p>Tickets im Status „Wartend“, aktuell</p>
+                </div>
+            </header>
+            @if (s.Wartend.Count == 0)
+            {
+                <p class="viz-empty">Gerade wartet kein Ticket.</p>
+            }
+            else
+            {
+                <ol class="wait-list">
+                    @foreach (var t in s.Wartend)
+                    {
+                        <li>
+                            <a href="tickets/@t.Id">
+                                <span class="tno">@t.Ticketnummer</span>
+                                <span class="wait-title">@t.Betreff</span>
+                                <span class="wait-who">@(string.IsNullOrWhiteSpace(t.WartetAuf) ? "–" : t.WartetAuf)</span>
+                                <span class="wait-days">@(t.WartetSeit is { } ws ? Tage((DateTime.Now - ws).TotalDays) : "–")</span>
+                            </a>
+                        </li>
+                    }
+                </ol>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private static readonly (int Tage, string Text)[] Zeitraeume =
+        [(30, "30 Tage"), (90, "90 Tage"), (365, "12 Monate"), (0, "Gesamt")];
+
+    private List<Ticket>? tickets;
+    private int zeitraumTage = 90;
+    private static readonly CultureInfo De = new("de-DE");
+
+    protected override async Task OnInitializedAsync()
+    {
+        Service.Geaendert += OnGeaendert;
+        tickets = await Service.AlleAsync();
+    }
+
+    private sealed record Punkt(string Label, int Neu, int Erledigt);
+    private sealed record Mandant(string Name, int Offen, int Erledigt);
+    private sealed record Auswertung(
+        int Offen, int Ueberfaellig, int Erledigt, int? ErledigtVorher, int Neu,
+        double? MedianTage, double? MittelTage, int TasksErledigt, int TasksOffen,
+        bool ProMonat, List<Punkt> Verlauf,
+        List<(TicketStatus Status, int Anzahl)> ProStatus,
+        List<(TicketStatus Status, double Tage, int Anzahl)> ZeitJeStatus,
+        List<(string Label, int Anzahl)> Verteilung,
+        List<Mandant> Mandanten,
+        List<Ticket> Wartend);
+
+    private static DateTime Erhalten(Ticket t) => t.AufgabeErhalten ?? t.ErstelltAm;
+
+    private Auswertung Berechnen()
+    {
+        var jetzt = DateTime.Now;
+        var alle = tickets!;
+        var start = zeitraumTage > 0
+            ? DateTime.Today.AddDays(-zeitraumTage + 1)
+            : alle.Select(Erhalten).DefaultIfEmpty(DateTime.Today).Min().Date;
+        bool ImZeitraum(DateTime? d) => d is { } x && x >= start && x <= jetzt;
+
+        var erledigt = alle.Where(t => t.Erledigt && ImZeitraum(t.ErledigtAm)).ToList();
+        int? vorher = null;
+        if (zeitraumTage > 0)
+        {
+            var vStart = start.AddDays(-zeitraumTage);
+            vorher = alle.Count(t => t.Erledigt && t.ErledigtAm is { } e && e >= vStart && e < start);
+        }
+
+        var dauern = erledigt.Select(t => Math.Max(0, (t.ErledigtAm!.Value - Erhalten(t)).TotalDays)).OrderBy(x => x).ToList();
+        double? median = dauern.Count == 0 ? null
+            : dauern.Count % 2 == 1 ? dauern[dauern.Count / 2] : (dauern[dauern.Count / 2 - 1] + dauern[dauern.Count / 2]) / 2;
+
+        // Verlauf: Wochen (bis 90 Tage) oder Monate
+        var proMonat = zeitraumTage == 0 || zeitraumTage > 120;
+        var verlauf = new List<Punkt>();
+        if (proMonat)
+        {
+            var m = new DateTime(start.Year, start.Month, 1);
+            while (m <= jetzt)
+            {
+                var ende = m.AddMonths(1);
+                verlauf.Add(new Punkt(m.ToString("MMM yy", De),
+                    alle.Count(t => Erhalten(t) >= m && Erhalten(t) < ende),
+                    alle.Count(t => t.Erledigt && t.ErledigtAm >= m && t.ErledigtAm < ende)));
+                m = ende;
+            }
+        }
+        else
+        {
+            var w = start.AddDays(-(((int)start.DayOfWeek + 6) % 7));   // Montag
+            while (w <= jetzt)
+            {
+                var ende = w.AddDays(7);
+                verlauf.Add(new Punkt("KW " + ISOWeek.GetWeekOfYear(w),
+                    alle.Count(t => Erhalten(t) >= w && Erhalten(t) < ende),
+                    alle.Count(t => t.Erledigt && t.ErledigtAm >= w && t.ErledigtAm < ende)));
+                w = ende;
+            }
+        }
+
+        var offen = alle.Where(t => !t.Erledigt).ToList();
+        var proStatus = Enum.GetValues<TicketStatus>().Where(st => st != TicketStatus.Erledigt)
+            .Select(st => (st, offen.Count(t => t.Status == st))).ToList();
+
+        // Zeit je Status aus den Status-Schritten
+        var segmente = new List<(TicketStatus Status, double Tage)>();
+        foreach (var t in alle)
+        {
+            var wechsel = t.Schritte
+                .Select(x => TicketStatusExtensions.SchrittLesen(x.Text, out var von, out var nach) ? (x.Datum, von, nach, ok: true) : (x.Datum, von, nach, ok: false))
+                .Where(x => x.ok).OrderBy(x => x.Datum).ToList();
+            var seit = Erhalten(t);
+            var status = wechsel.Count > 0 ? wechsel[0].von : t.Status;
+            foreach (var w in wechsel)
+            {
+                if (ImZeitraum(w.Datum) && status != TicketStatus.Erledigt && w.Datum > seit)
+                    segmente.Add((status, (w.Datum - seit).TotalDays));
+                seit = w.Datum;
+                status = w.nach;
+            }
+            if (!t.Erledigt && status != TicketStatus.Erledigt && seit < jetzt)
+                segmente.Add((status, (jetzt - seit).TotalDays));   // aktueller, noch laufender Status
+        }
+        var zeitJeStatus = segmente.GroupBy(x => x.Status).OrderBy(g => g.Key)
+            .Select(g => (g.Key, g.Average(x => x.Tage), g.Count())).ToList();
+
+        (string, Func<double, bool>)[] klassen =
+        [
+            ("< 1 Tag", d => d < 1), ("1–3 Tage", d => d >= 1 && d < 3), ("3–7 Tage", d => d >= 3 && d < 7),
+            ("1–2 Wo.", d => d >= 7 && d < 14), ("2–4 Wo.", d => d >= 14 && d < 28), ("> 4 Wo.", d => d >= 28),
+        ];
+        var verteilung = klassen.Select(k => (k.Item1, dauern.Count(k.Item2))).ToList();
+
+        var imZeitraum = alle.Where(t => ImZeitraum(Erhalten(t))).ToList();
+        var gruppen = imZeitraum.GroupBy(t => string.IsNullOrWhiteSpace(t.Mandant) ? "Ohne Mandant" : t.Mandant.Trim())
+            .Select(g => new Mandant(g.Key, g.Count(t => !t.Erledigt), g.Count(t => t.Erledigt)))
+            .OrderByDescending(m => m.Offen + m.Erledigt).ThenBy(m => m.Name).ToList();
+        if (gruppen.Count > 8)
+        {
+            var rest = gruppen.Skip(7).ToList();
+            gruppen = gruppen.Take(7).Append(new Mandant($"Andere ({rest.Count})", rest.Sum(r => r.Offen), rest.Sum(r => r.Erledigt))).ToList();
+        }
+
+        var aufgaben = alle.SelectMany(t => t.Aufgaben).ToList();
+
+        return new Auswertung(
+            offen.Count, offen.Count(t => t.IstUeberfaellig), erledigt.Count, vorher,
+            alle.Count(t => ImZeitraum(Erhalten(t))),
+            median, dauern.Count == 0 ? null : dauern.Average(),
+            aufgaben.Count(a => a.Status == AufgabeStatus.Erledigt && ImZeitraum(a.ErledigtAm)),
+            aufgaben.Count(a => a.Status != AufgabeStatus.Erledigt && alle.First(t => t.Id == a.TicketId) is { Erledigt: false }),
+            proMonat, verlauf, proStatus, zeitJeStatus, verteilung, gruppen,
+            alle.Where(t => t.Status == TicketStatus.Wartend && !t.Erledigt)
+                .OrderBy(t => t.WartetSeit ?? DateTime.MaxValue).Take(8).ToList());
+    }
+
+    // ── Formatierung ───────────────────────────────────────────
+    private string ZeitraumText() => zeitraumTage switch
+    {
+        0 => "Alle Tickets seit Beginn",
+        _ => $"Zeitraum: {DateTime.Today.AddDays(-zeitraumTage + 1):dd.MM.yyyy} – heute",
+    };
+
+    private static string Tage(double tage)
+    {
+        // (Kein switch mit „< 1 =>“ am Zeilenanfang – Razor hält das sonst für ein HTML-Tag.)
+        if (tage < 1) return $"{Math.Max(1, Math.Round(tage * 24)):0} Std.";
+        if (tage < 10) return tage.ToString("0.0", De) + " T.";
+        return tage.ToString("0", De) + " T.";
+    }
+
+    private static string Prozent(double wert, double max) =>
+        (max <= 0 ? 0 : Math.Clamp(wert / max * 100, 0, 100)).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+
+    /// <summary>Glatte, gerade Obergrenze für die Achse (2, 4, 6, 8, 10, 20 …), damit die Mittellinie ganzzahlig ist.</summary>
+    private static int SchoenesMaximum(int wert)
+    {
+        if (wert <= 2) return 2;
+        var stufe = (int)Math.Pow(10, Math.Floor(Math.Log10(wert)));
+        foreach (var f in new[] { 1, 2, 4, 6, 8, 10 })
+            if (f * stufe >= wert && f * stufe % 2 == 0) return f * stufe;
+        return 10 * stufe;
+    }
+
+    private static bool ZeigeLabel(int i, int anzahl) => anzahl <= 14 || i % (int)Math.Ceiling(anzahl / 12.0) == 0;
+
+    private void OnGeaendert() => _ = InvokeAsync(async () =>
+    {
+        tickets = await Service.AlleAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Service.Geaendert -= OnGeaendert;
+}

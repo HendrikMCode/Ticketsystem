@@ -1,0 +1,293 @@
+@page "/taskboard"
+@implements IDisposable
+@inject ITicketService Service
+@inject NavigationManager Nav
+
+<PageTitle>Taskboard – Tickets</PageTitle>
+
+<div class="list-head">
+    <div>
+        <h1 class="headline">Taskboard</h1>
+        <p class="supporting">Tasks je Ticket – zwischen den Spalten ziehen oder auf das Symbol klicken@(string.IsNullOrWhiteSpace(Suche) ? "" : $" · Suche: „{Suche.Trim()}“")</p>
+    </div>
+    <div class="head-actions">
+        <button type="button" class="filter-chip date @(ohneTasks ? "selected" : null)" @onclick="() => ohneTasks = !ohneTasks">
+            <md-ripple></md-ripple><md-icon>@(ohneTasks ? "check" : "playlist_add")</md-icon>Tickets ohne Tasks
+        </button>
+        <button type="button" class="filter-chip date @(erledigteTickets ? "selected" : null)" @onclick="() => erledigteTickets = !erledigteTickets">
+            <md-ripple></md-ripple><md-icon>@(erledigteTickets ? "check" : "task_alt")</md-icon>Erledigte Tickets
+        </button>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="banner error"><md-icon>error</md-icon><span>@fehler</span></div>
+}
+
+@if (tickets is null)
+{
+    <md-linear-progress indeterminate class="loading"></md-linear-progress>
+}
+else
+{
+    var zeilen = Zeilen();
+    if (zeilen.Count == 0)
+    {
+        <div class="empty">
+            <div class="empty-icon"><md-icon>view_week</md-icon></div>
+            <h2>Noch keine Tasks</h2>
+            <p>Lege Tasks auf der Ticketseite an oder blende hier „Tickets ohne Tasks“ ein.</p>
+            <md-outlined-button @onclick="() => ohneTasks = true">Tickets ohne Tasks anzeigen</md-outlined-button>
+        </div>
+    }
+    else
+    {
+        <div class="taskboard">
+            <div class="tb-head">
+                <div>Ticket</div>
+                @foreach (var st in Enum.GetValues<AufgabeStatus>())
+                {
+                    <div><md-icon>@st.Symbol()</md-icon>@st.Anzeige() <span class="col-count">@zeilen.Sum(t => t.Aufgaben.Count(a => a.Status == st))</span></div>
+                }
+            </div>
+
+            @foreach (var t in zeilen)
+            {
+                var ticket = t;
+                var zu = eingeklappt.Contains(ticket.Id);
+                <div class="tb-row @(zu ? "collapsed" : null)">
+                    <div class="tb-ticket">
+                        <md-icon-button class="tb-toggle" title="@(zu ? "Aufklappen" : "Einklappen")" @onclick="() => Umschalten(ticket.Id)">
+                            <md-icon>@(zu ? "chevron_right" : "expand_more")</md-icon>
+                        </md-icon-button>
+                        <div class="tb-ticket-info">
+                            <a href="tickets/@ticket.Id" class="tb-ticket-link">
+                                <span class="tno">@ticket.Ticketnummer</span>
+                                <span class="tb-ticket-title">@ticket.Betreff</span>
+                            </a>
+                            <div class="tb-ticket-meta">
+                                <StatusBadge Status="ticket.Status" Klein />
+                                @if (ticket.AufgabenGesamt > 0)
+                                {
+                                    <span>@ticket.AufgabenErledigt/@ticket.AufgabenGesamt</span>
+                                }
+                                @if (ticket.RestaufwandSumme > 0) { <span>@Board.Stunden(ticket.RestaufwandSumme) h Rest</span> }
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (zu)
+                    {
+                        <div class="tb-collapsed-info">@ticket.AufgabenGesamt Tasks · @ticket.AufgabenErledigt erledigt</div>
+                    }
+                    else
+                    {
+                        @foreach (var st in Enum.GetValues<AufgabeStatus>())
+                        {
+                            var spalte = st;
+                            var istZiel = ueber == (ticket.Id, spalte) && gezogen is not null && gezogen.TicketId == ticket.Id && gezogen.Status != spalte;
+                            <div class="tb-cell @spalte.Css() @(istZiel ? "drop-target" : null)"
+                                 @ondragenter="() => ueber = (ticket.Id, spalte)"
+                                 @ondragover="() => ueber = (ticket.Id, spalte)" @ondragover:preventDefault="true"
+                                 @ondrop="() => Ablegen(ticket, spalte)" @ondrop:preventDefault="true">
+                                @foreach (var a in ticket.Aufgaben.Where(x => x.Status == spalte).OrderBy(x => x.Reihenfolge))
+                                {
+                                    var aufgabe = a;
+                                    <div class="task-card @aufgabe.Status.Css() @(gezogen == aufgabe ? "dragging" : null)"
+                                         draggable="@(bearbeitet == aufgabe ? "false" : "true")" data-drag="@aufgabe.Id"
+                                         @ondragstart="() => gezogen = aufgabe" @ondragend="ZiehenBeendet">
+                                        @if (bearbeitet == aufgabe)
+                                        {
+                                            <input class="task-edit-title" @bind="bearbeitenTitel" @bind:event="oninput"
+                                                   @onkeydown="e => BearbeitenTaste(e)" aria-label="Titel" autofocus />
+                                            <div class="task-edit-bar">
+                                                <label class="hours">
+                                                    <input type="number" min="0" step="0.5" placeholder="–" value="@bearbeitenStunden"
+                                                           @onchange="e => bearbeitenStunden = e.Value?.ToString() ?? string.Empty" @onkeydown="e => BearbeitenTaste(e)" />
+                                                    h
+                                                </label>
+                                                <span class="spacer"></span>
+                                                <md-icon-button title="Löschen" @onclick="() => Loeschen(aufgabe)"><md-icon>delete</md-icon></md-icon-button>
+                                                <md-icon-button title="Abbrechen (Esc)" @onclick="() => bearbeitet = null"><md-icon>close</md-icon></md-icon-button>
+                                                <md-icon-button title="Übernehmen (Enter)" @onclick="BearbeitenSpeichern"><md-icon>check</md-icon></md-icon-button>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="task-state-btn" title="@aufgabe.Status.Anzeige() – klicken für „@aufgabe.Status.Naechster().Anzeige()“"
+                                                    @onclick="() => StatusWeiter(aufgabe)">
+                                                <md-icon>@aufgabe.Status.Symbol()</md-icon>
+                                            </button>
+                                            <span class="task-title" @ondblclick="() => Bearbeiten(aufgabe)">@aufgabe.Titel</span>
+                                            @if (aufgabe.RestaufwandStunden is > 0 and var h) { <span class="task-hours">@Board.Stunden(h) h</span> }
+                                            <md-icon-button class="task-edit" title="Bearbeiten" @onclick="() => Bearbeiten(aufgabe)"><md-icon>edit</md-icon></md-icon-button>
+                                        }
+                                    </div>
+                                }
+
+                                @if (spalte == AufgabeStatus.Offen)
+                                {
+                                    if (neuFuer == ticket.Id)
+                                    {
+                                        <input class="tb-add-input" placeholder="Titel, dann Enter" @bind="neuerTitel" @bind:event="oninput"
+                                               @onkeydown="e => NeuTaste(e, ticket)" @onblur="() => { if (string.IsNullOrWhiteSpace(neuerTitel)) neuFuer = null; }" autofocus />
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="tb-add" @onclick="() => { neuFuer = ticket.Id; neuerTitel = string.Empty; }">
+                                            <md-icon>add</md-icon>Task
+                                        </button>
+                                    }
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? Suche { get; set; }
+
+    private List<Ticket>? tickets;
+    private Aufgabe? gezogen;
+    private (int TicketId, AufgabeStatus Status)? ueber;
+    private bool ohneTasks, erledigteTickets;
+    private readonly HashSet<int> eingeklappt = new();
+    private string? fehler;
+
+    private int? neuFuer;
+    private string neuerTitel = "";
+
+    private Aufgabe? bearbeitet;
+    private string bearbeitenTitel = "", bearbeitenStunden = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Service.Geaendert += OnGeaendert;
+        tickets = await Service.AlleAsync();
+    }
+
+    private List<Ticket> Zeilen() => tickets!
+        .Where(t => erledigteTickets || !t.Erledigt)
+        .Where(t => ohneTasks || t.AufgabenGesamt > 0)
+        .Where(t => TicketSuche.Passt(t, Suche))
+        // Tickets mit Tasks „In Arbeit“ zuerst, dann nach Fälligkeit
+        .OrderByDescending(t => t.Aufgaben.Any(a => a.Status == AufgabeStatus.InArbeit))
+        .ThenBy(t => t.AufgabenGesamt > 0 && t.AufgabenErledigt == t.AufgabenGesamt)
+        .ThenBy(t => t.Faellig ?? DateTime.MaxValue)
+        .ThenByDescending(t => t.GeaendertAm)
+        .ToList();
+
+    private void Umschalten(int ticketId)
+    {
+        if (!eingeklappt.Remove(ticketId)) eingeklappt.Add(ticketId);
+    }
+
+    // ── Ziehen & Ablegen ───────────────────────────────────────
+    private async Task Ablegen(Ticket ticket, AufgabeStatus ziel)
+    {
+        var a = gezogen;
+        ZiehenBeendet();
+        if (a is null || a.TicketId != ticket.Id || a.Status == ziel) return;
+        await StatusSetzen(a, ziel);
+    }
+
+    private void ZiehenBeendet()
+    {
+        gezogen = null;
+        ueber = null;
+    }
+
+    private Task StatusWeiter(Aufgabe a) => StatusSetzen(a, a.Status.Naechster());
+
+    private async Task StatusSetzen(Aufgabe a, AufgabeStatus ziel)
+    {
+        var alt = a.Status;
+        a.Status = ziel;   // sofort anzeigen
+        fehler = null;
+        try
+        {
+            await Service.AufgabeAendernAsync(a);
+        }
+        catch (Exception ex)
+        {
+            a.Status = alt;
+            fehler = "Task konnte nicht geändert werden: " + ex.Message;
+        }
+    }
+
+    // ── Neu / Bearbeiten / Löschen ─────────────────────────────
+    private async Task NeuTaste(KeyboardEventArgs e, Ticket ticket)
+    {
+        if (e.Key == "Escape") { neuFuer = null; return; }
+        if (e.Key != "Enter" || string.IsNullOrWhiteSpace(neuerTitel)) return;
+        var titel = neuerTitel;
+        neuerTitel = "";   // Eingabe bleibt offen für den nächsten Task
+        try
+        {
+            var (aufgabe, _) = await Service.AufgabeHinzufuegenAsync(ticket.Id, titel);
+            ticket.Aufgaben.Add(aufgabe);
+        }
+        catch (Exception ex)
+        {
+            fehler = "Task konnte nicht angelegt werden: " + ex.Message;
+        }
+    }
+
+    private void Bearbeiten(Aufgabe a)
+    {
+        bearbeitet = a;
+        bearbeitenTitel = a.Titel;
+        bearbeitenStunden = a.RestaufwandStunden?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
+    }
+
+    private async Task BearbeitenTaste(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await BearbeitenSpeichern();
+        else if (e.Key == "Escape") bearbeitet = null;
+    }
+
+    private async Task BearbeitenSpeichern()
+    {
+        var a = bearbeitet;
+        if (a is null || string.IsNullOrWhiteSpace(bearbeitenTitel)) return;
+        a.Titel = bearbeitenTitel.Trim();
+        a.RestaufwandStunden = StundenLesen(bearbeitenStunden);
+        bearbeitet = null;
+        try { await Service.AufgabeAendernAsync(a); }
+        catch (Exception ex) { fehler = "Task konnte nicht gespeichert werden: " + ex.Message; }
+    }
+
+    private async Task Loeschen(Aufgabe a)
+    {
+        bearbeitet = null;
+        try
+        {
+            await Service.AufgabeLoeschenAsync(a.Id);
+            tickets!.FirstOrDefault(t => t.Id == a.TicketId)?.Aufgaben.Remove(a);
+        }
+        catch (Exception ex) { fehler = "Task konnte nicht gelöscht werden: " + ex.Message; }
+    }
+
+    internal static double? StundenLesen(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        text = text.Replace(',', '.');
+        return double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var h) && h > 0
+            ? Math.Round(h, 2) : null;
+    }
+
+    private void OnGeaendert() => _ = InvokeAsync(async () =>
+    {
+        // während des Bearbeitens nicht neu laden, sonst ginge die Eingabe verloren
+        if (bearbeitet is not null || gezogen is not null) return;
+        tickets = await Service.AlleAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Service.Geaendert -= OnGeaendert;
+}

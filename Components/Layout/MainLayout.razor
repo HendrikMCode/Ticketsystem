@@ -1,0 +1,193 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ITicketService Service
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<div class="app @(eingeklappt ? "rail" : null)">
+    @* ── Obere Leiste ─────────────────────────────────────────── *@
+    <header class="topbar">
+        <md-icon-button class="topbar-menu" title="Hauptmenü" @onclick="() => eingeklappt = !eingeklappt">
+            <md-icon>menu</md-icon>
+        </md-icon-button>
+
+        <a class="product" href="">
+            <span class="product-logo"><md-icon>confirmation_number</md-icon></span>
+            <span class="product-name">Tickets</span>
+        </a>
+
+        <div class="searchbar @(sucheFokus ? "focused" : null)">
+            <md-icon>search</md-icon>
+            <input type="search" placeholder="In Tickets suchen" aria-label="In Tickets suchen"
+                   value="@suche" @oninput="Suchen"
+                   @onfocus="() => sucheFokus = true" @onblur="() => sucheFokus = false" />
+            @if (!string.IsNullOrEmpty(suche))
+            {
+                <md-icon-button title="Suche löschen" @onclick="SucheLeeren"><md-icon>close</md-icon></md-icon-button>
+            }
+        </div>
+
+        <div class="topbar-actions">
+            <span class="badge-wrap">
+                <md-icon-button title="Fällige Erinnerungen" @onclick='() => Nav.NavigateTo("?filter=erinnerung")'>
+                    <md-icon>notifications</md-icon>
+                </md-icon-button>
+                @if (erinnerungen > 0) { <span class="badge">@erinnerungen</span> }
+            </span>
+            <md-icon-button title="@(dunkel ? "Helles Design" : "Dunkles Design")" @onclick="ThemeUmschalten">
+                <md-icon>@(dunkel ? "light_mode" : "dark_mode")</md-icon>
+            </md-icon-button>
+        </div>
+    </header>
+
+    @* ── Navigation (wie in Gmail/Drive) ─────────────────────── *@
+    <nav class="drawer" aria-label="Navigation">
+        <md-fab class="compose compose-full" variant="primary" label="Neues Ticket"
+                @onclick='() => Nav.NavigateTo("tickets/neu")'>
+            <md-icon slot="icon">edit</md-icon>
+        </md-fab>
+        <md-fab class="compose compose-mini" variant="primary" title="Neues Ticket" aria-label="Neues Ticket"
+                @onclick='() => Nav.NavigateTo("tickets/neu")'>
+            <md-icon slot="icon">edit</md-icon>
+        </md-fab>
+
+        <div class="nav-list">
+            @NavEintrag("", "inbox", "Offen", zaehler.Offen, filter == "offen")
+            @NavEintrag("?filter=ueberfaellig", "event_busy", "Überfällig", zaehler.Ueberfaellig, filter == "ueberfaellig", warn: zaehler.Ueberfaellig > 0)
+            @NavEintrag("?filter=erinnerung", "notifications", "Erinnerungen", zaehler.Erinnerungen, filter == "erinnerung")
+            @NavEintrag("?filter=alle", "stacks", "Alle Tickets", zaehler.Alle, filter == "alle")
+
+            <md-divider></md-divider>
+            <div class="nav-heading">Ansichten</div>
+            @NavEintrag("board", "view_kanban", "Board", 0, pfad == "board")
+            @NavEintrag("taskboard", "view_week", "Taskboard", zaehler.OffeneTasks, pfad == "taskboard")
+            @NavEintrag("statistik", "monitoring", "Statistik", 0, pfad == "statistik")
+
+            <md-divider></md-divider>
+            <div class="nav-heading">Status</div>
+
+            @foreach (var s in Enum.GetValues<TicketStatus>())
+            {
+                var key = s.ToString();
+                <a class="nav-item status @s.Css() @(filter == key ? "active" : null)" href="?filter=@key" title="@s.Anzeige()">
+                    <md-ripple></md-ripple>
+                    <md-icon class="nav-status-icon">label</md-icon>
+                    <span class="nav-label">@s.Anzeige()</span>
+                    @if (zaehler.ProStatus.GetValueOrDefault(s) is > 0 and var n) { <span class="nav-count">@n</span> }
+                </a>
+            }
+        </div>
+    </nav>
+
+    <main class="surface">
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Ein Fehler ist aufgetreten.
+    <a href="." class="reload">Neu laden</a>
+    <span class="dismiss">✕</span>
+</div>
+
+@code {
+    private record Zaehler(int Offen, int Ueberfaellig, int Erinnerungen, int Alle, int OffeneTasks, Dictionary<TicketStatus, int> ProStatus);
+
+    private Zaehler zaehler = new(0, 0, 0, 0, 0, new());
+    private string pfad = "";
+    private int erinnerungen => zaehler.Erinnerungen;
+    private bool dunkel, eingeklappt, sucheFokus;
+    private string suche = "";
+    private string? filter;      // aktiver Filter der Übersicht (null = andere Seite)
+    private Timer? timer;
+
+    private RenderFragment NavEintrag(string href, string icon, string text, int anzahl, bool aktiv, bool warn = false) =>
+        @<a class="nav-item @(aktiv ? "active" : null) @(warn ? "warn" : null)" href="@href" title="@text">
+            <md-ripple></md-ripple>
+            <md-icon data-filled="@(aktiv ? "true" : null)">@icon</md-icon>
+            <span class="nav-label">@text</span>
+            @if (anzahl > 0) { <span class="nav-count">@anzahl</span> }
+        </a>;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Service.Geaendert += OnGeaendert;
+        Nav.LocationChanged += OnLocationChanged;
+        AdresseAuswerten(Nav.Uri);
+        await ZaehlerAktualisieren();
+        // jede Minute prüfen, ob neue Erinnerungen fällig sind
+        timer = new Timer(_ => OnGeaendert(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            dunkel = await JS.InvokeAsync<string>("ticketsystem.theme") == "dark";
+            StateHasChanged();
+        }
+    }
+
+    private async Task ZaehlerAktualisieren()
+    {
+        var alle = await Service.AlleAsync();
+        zaehler = new Zaehler(
+            alle.Count(t => !t.Erledigt),
+            alle.Count(t => t.IstUeberfaellig),
+            alle.Count(t => t.ErinnerungFaellig),
+            alle.Count,
+            alle.Where(t => !t.Erledigt).Sum(t => t.AufgabenGesamt - t.AufgabenErledigt),
+            alle.GroupBy(t => t.Status).ToDictionary(g => g.Key, g => g.Count()));
+    }
+
+    // ── Adresse lesen: aktiver Filter + Suchbegriff ────────────
+    private void AdresseAuswerten(string uri)
+    {
+        var u = new Uri(uri);
+        pfad = Nav.ToBaseRelativePath(uri).Split('?', '#')[0].TrimEnd('/');
+        var query = System.Web.HttpUtility.ParseQueryString(u.Query);
+        filter = pfad == "" ? (query["filter"] ?? "offen") : null;
+        if (MitSuche && !sucheFokus) suche = query["q"] ?? "";
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        AdresseAuswerten(e.Location);
+        InvokeAsync(StateHasChanged);
+    }
+
+    // ── Suche: filtert Übersicht, Board und Taskboard direkt, sonst Sprung zur Übersicht ──
+    private bool MitSuche => pfad is "" or "board" or "taskboard";
+
+    private void Suchen(ChangeEventArgs e)
+    {
+        suche = e.Value?.ToString() ?? "";
+        var wert = string.IsNullOrWhiteSpace(suche) ? null : suche;
+        if (MitSuche)
+            Nav.NavigateTo(Nav.GetUriWithQueryParameter("q", wert), replace: true);
+        else
+            Nav.NavigateTo(wert is null ? "" : "?filter=alle&q=" + Uri.EscapeDataString(wert));
+    }
+
+    private void SucheLeeren()
+    {
+        suche = "";
+        if (MitSuche) Nav.NavigateTo(Nav.GetUriWithQueryParameter("q", (string?)null), replace: true);
+    }
+
+    private void OnGeaendert() => _ = InvokeAsync(async () =>
+    {
+        await ZaehlerAktualisieren();
+        StateHasChanged();
+    });
+
+    private async Task ThemeUmschalten() =>
+        dunkel = await JS.InvokeAsync<string>("ticketsystem.toggleTheme") == "dark";
+
+    public void Dispose()
+    {
+        Service.Geaendert -= OnGeaendert;
+        Nav.LocationChanged -= OnLocationChanged;
+        timer?.Dispose();
+    }
+}
