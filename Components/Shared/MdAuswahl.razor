@@ -1,0 +1,162 @@
+@inherits InputBase<string?>
+@* Textfeld mit Vervollständigung aus der Auswahlliste (Einstellungen). Gewählte Werte stehen als Chips im Feld,
+   es können mehrere sein. Gespeichert wird als Text, getrennt mit „; “ (Auswahl.Trenner). *@
+
+<div class="auswahl">
+    <md-outlined-field class="m3-field" label="@Label" populated="@(Gewaehlt.Count > 0 || text.Length > 0)" focused="@fokus" has-start="@(Icon is not null)">
+        @if (Icon is not null)
+        {
+            <md-icon slot="start">@Icon</md-icon>
+        }
+        <div class="auswahl-inhalt">
+            @foreach (var g in Gewaehlt)
+            {
+                var wert = g;
+                var fremd = !Werte.Contains(wert, StringComparer.OrdinalIgnoreCase);
+                <span class="auswahl-wert @(fremd ? "fremd" : null)" title="@(fremd ? "Nicht in der Auswahlliste" : null)">
+                    @wert
+                    <button type="button" title="„@wert“ entfernen" @onclick="() => Entfernen(wert)"><md-icon>close</md-icon></button>
+                </span>
+            }
+            <input class="auswahl-input" type="text" autocomplete="off" data-auswahl
+                   role="combobox" aria-expanded="@(Offen ? "true" : "false")" aria-autocomplete="list" aria-label="@Label"
+                   placeholder="@(fokus && Gewaehlt.Count == 0 ? Placeholder : null)"
+                   @bind="text" @bind:event="oninput" @bind:after="NachEingabe" @onkeydown="Taste"
+                   @onfocus="() => { fokus = true; markiert = -1; }" @onblur="() => fokus = false" />
+        </div>
+    </md-outlined-field>
+
+    @if (Offen)
+    {
+        <div class="menu auswahl-menu" role="listbox" aria-label="@Label">
+            @for (var i = 0; i < Treffer.Count; i++)
+            {
+                var index = i;
+                var wert = Treffer[i];
+                <button type="button" role="option" tabindex="-1" aria-selected="@(index == markiert ? "true" : "false")"
+                        class="menu-item @(index == markiert ? "selected" : null)"
+                        @onmousedown:preventDefault="true" @onclick="() => Hinzufuegen(wert)">
+                    <md-icon>@Icon</md-icon><span>@Hervorheben(wert)</span>
+                </button>
+            }
+            @if (FreitextMoeglich)
+            {
+                var index = Treffer.Count;
+                <button type="button" role="option" tabindex="-1" aria-selected="@(index == markiert ? "true" : "false")"
+                        class="menu-item @(index == markiert ? "selected" : null)"
+                        @onmousedown:preventDefault="true" @onclick="() => Hinzufuegen(text.Trim())">
+                    <md-icon>add</md-icon><span>„@text.Trim()“ übernehmen</span><small>nicht in der Liste</small>
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public string? Placeholder { get; set; }
+    /// <summary>Die Einträge aus der Auswahlliste, in der gewünschten Reihenfolge.</summary>
+    [Parameter] public IReadOnlyList<string> Werte { get; set; } = [];
+
+    private const int MaxTreffer = 8;
+
+    private string text = "";
+    private bool fokus;
+    private int markiert = -1;   // per Pfeiltasten markierter Vorschlag (-1 = keiner)
+
+    private List<string> Gewaehlt => Auswahl.Trennen(CurrentValue);
+
+    /// <summary>Passende, noch nicht gewählte Einträge – Treffer am Wortanfang zuerst.</summary>
+    private List<string> Treffer
+    {
+        get
+        {
+            var suche = text.Trim();
+            var gewaehlt = Gewaehlt;
+            return Werte
+                .Where(w => !gewaehlt.Contains(w, StringComparer.OrdinalIgnoreCase))
+                .Where(w => w.Contains(suche, StringComparison.CurrentCultureIgnoreCase))
+                .OrderBy(w => w.StartsWith(suche, StringComparison.CurrentCultureIgnoreCase) ? 0 : 1)
+                .Take(MaxTreffer)
+                .ToList();
+        }
+    }
+
+    private bool FreitextMoeglich
+    {
+        get
+        {
+            var t = text.Trim();
+            return t.Length > 0 && !t.Contains(';')
+                && !Werte.Contains(t, StringComparer.OrdinalIgnoreCase)
+                && !Gewaehlt.Contains(t, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private bool Offen => fokus && (Treffer.Count > 0 || FreitextMoeglich);
+
+    private void NachEingabe()
+    {
+        // Beim Tippen gleich den ersten Treffer markieren, damit Enter ihn übernimmt
+        markiert = text.Trim().Length > 0 && (Treffer.Count > 0 || FreitextMoeglich) ? 0 : -1;
+    }
+
+    private void Taste(KeyboardEventArgs e)
+    {
+        var anzahl = Treffer.Count + (FreitextMoeglich ? 1 : 0);
+        switch (e.Key)
+        {
+            case "ArrowDown" when anzahl > 0:
+                markiert = (markiert + 1) % anzahl;
+                break;
+            case "ArrowUp" when anzahl > 0:
+                markiert = markiert <= 0 ? anzahl - 1 : markiert - 1;
+                break;
+            case "Enter":
+                if (markiert >= 0 && markiert < Treffer.Count) Hinzufuegen(Treffer[markiert]);
+                else if (markiert == Treffer.Count && FreitextMoeglich) Hinzufuegen(text.Trim());
+                break;
+            case "Escape":
+                text = "";
+                markiert = -1;
+                break;
+            case "Backspace" when text.Length == 0 && Gewaehlt.Count > 0:
+                Entfernen(Gewaehlt[^1]);
+                break;
+        }
+    }
+
+    private void Hinzufuegen(string wert)
+    {
+        if (string.IsNullOrWhiteSpace(wert)) return;
+        var gewaehlt = Gewaehlt;
+        if (!gewaehlt.Contains(wert, StringComparer.OrdinalIgnoreCase)) gewaehlt.Add(wert);
+        CurrentValue = Auswahl.Verbinden(gewaehlt);
+        text = "";
+        markiert = -1;
+    }
+
+    private void Entfernen(string wert)
+    {
+        var gewaehlt = Gewaehlt;
+        gewaehlt.RemoveAll(g => string.Equals(g, wert, StringComparison.OrdinalIgnoreCase));
+        CurrentValue = Auswahl.Verbinden(gewaehlt);
+    }
+
+    /// <summary>Den getippten Teil im Vorschlag fett darstellen.</summary>
+    private RenderFragment Hervorheben(string wert) => __builder =>
+    {
+        var suche = text.Trim();
+        var i = suche.Length == 0 ? -1 : wert.IndexOf(suche, StringComparison.CurrentCultureIgnoreCase);
+        if (i < 0) { @wert; return; }
+        @wert[..i]<strong>@wert.Substring(i, suche.Length)</strong>@wert[(i + suche.Length)..]
+    };
+
+    protected override bool TryParseValueFromString(string? value, out string? result, out string validationErrorMessage)
+    {
+        result = string.IsNullOrEmpty(value) ? null : value;
+        validationErrorMessage = "";
+        return true;
+    }
+}

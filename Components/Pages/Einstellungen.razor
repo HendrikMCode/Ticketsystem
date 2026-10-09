@@ -1,0 +1,149 @@
+@page "/einstellungen"
+@inject ITicketService Service
+
+<PageTitle>Einstellungen – Tickets</PageTitle>
+
+<div class="list-head">
+    <div>
+        <h1 class="headline">Einstellungen</h1>
+        <p class="supporting">Auswahllisten für Ansprechpartner, Mandant und Umfeld. Im Ticket wählst du daraus einen oder mehrere Einträge aus.</p>
+    </div>
+</div>
+
+@if (werte is null)
+{
+    <md-linear-progress indeterminate class="loading"></md-linear-progress>
+}
+else
+{
+    <div class="einstellungen-grid">
+        @foreach (var f in Enum.GetValues<AuswahlFeld>())
+        {
+            var feld = f;
+            var liste = werte.Where(w => w.Feld == feld).OrderBy(w => w.Reihenfolge).ToList();
+            <section class="pane tonal">
+                <h2 class="pane-title"><md-icon>@feld.Symbol()</md-icon>@feld.Name() <span class="count">@liste.Count</span></h2>
+
+                @if (liste.Count == 0)
+                {
+                    <p class="pane-empty auswahl-liste-leer">Noch keine Einträge.</p>
+                }
+                <ol class="auswahl-liste">
+                    @foreach (var w in liste)
+                    {
+                        var eintrag = w;
+                        var index = liste.IndexOf(eintrag);
+                        var anzahl = Verwendung(eintrag);
+                        <li class="auswahl-zeile" @key="(eintrag.Id, stand)">
+                            @if (loeschenId == eintrag.Id)
+                            {
+                                <span class="auswahl-frage">„@eintrag.Wert“ löschen?@(anzahl > 0 ? $" Die {anzahl} Tickets behalten den Wert." : "")</span>
+                                <md-text-button type="button" @onclick="() => loeschenId = null">Abbrechen</md-text-button>
+                                <md-filled-button type="button" class="danger" @onclick="() => Loeschen(eintrag)">Löschen</md-filled-button>
+                            }
+                            else
+                            {
+                                <input class="auswahl-name" value="@eintrag.Wert" aria-label="@feld.Name(): Eintrag umbenennen"
+                                       @onchange="e => Umbenennen(eintrag, e.Value?.ToString())" />
+                                <span class="auswahl-anzahl" title="In so vielen Tickets ausgewählt">@(anzahl == 1 ? "1 Ticket" : $"{anzahl} Tickets")</span>
+                                <md-icon-button type="button" title="Nach oben" disabled="@(index == 0)" @onclick="() => Verschieben(feld, liste, index, -1)">
+                                    <md-icon>arrow_upward</md-icon>
+                                </md-icon-button>
+                                <md-icon-button type="button" title="Nach unten" disabled="@(index == liste.Count - 1)" @onclick="() => Verschieben(feld, liste, index, 1)">
+                                    <md-icon>arrow_downward</md-icon>
+                                </md-icon-button>
+                                <md-icon-button type="button" title="Löschen" @onclick="() => loeschenId = eintrag.Id">
+                                    <md-icon>delete</md-icon>
+                                </md-icon-button>
+                            }
+                        </li>
+                    }
+                </ol>
+
+                <div class="task-add">
+                    <md-icon>add</md-icon>
+                    <input placeholder="Neuer Eintrag – Name eingeben und Enter drücken" aria-label="@feld.Name(): neuer Eintrag"
+                           @bind="neu[feld]" @bind:event="oninput" @onkeydown="e => NeuTaste(e, feld)" />
+                </div>
+                @if (fehler.GetValueOrDefault(feld) is { } text) { <div class="val">@text</div> }
+            </section>
+        }
+    </div>
+
+    <p class="meta einstellungen-hinweis">
+        Umbenennen ändert den Wert auch in allen Tickets, in denen er ausgewählt ist. Gelöschte Einträge bleiben in bestehenden Tickets erhalten,
+        werden dort aber nicht mehr zur Auswahl angeboten.
+        @if (meldung is not null) { <br /><strong>@meldung</strong> }
+    </p>
+}
+
+@code {
+    private List<Auswahlwert>? werte;
+    private List<Ticket> tickets = [];
+    private int? loeschenId;
+    private int stand;   // neu laden → Zeilen neu aufbauen (zeigt nach einem Fehler wieder den gespeicherten Namen)
+    private string? meldung;
+    private readonly Dictionary<AuswahlFeld, string> neu = Enum.GetValues<AuswahlFeld>().ToDictionary(f => f, _ => "");
+    private readonly Dictionary<AuswahlFeld, string> fehler = new();
+
+    protected override async Task OnInitializedAsync() => await Laden();
+
+    private async Task Laden()
+    {
+        werte = await Service.AuswahlwerteAsync();
+        tickets = await Service.AlleAsync();
+        stand++;
+    }
+
+    private int Verwendung(Auswahlwert w) =>
+        tickets.Count(t => Auswahl.Trennen(w.Feld.WertIn(t)).Contains(w.Wert, StringComparer.OrdinalIgnoreCase));
+
+    private async Task NeuTaste(KeyboardEventArgs e, AuswahlFeld feld)
+    {
+        if (e.Key != "Enter" || string.IsNullOrWhiteSpace(neu[feld])) return;
+        await Ausfuehren(feld, async () =>
+        {
+            werte!.Add(await Service.AuswahlwertHinzufuegenAsync(feld, neu[feld]));
+            neu[feld] = "";
+        });
+    }
+
+    private async Task Umbenennen(Auswahlwert w, string? name)
+    {
+        if (name is null || name.Trim() == w.Wert) return;
+        await Ausfuehren(w.Feld, async () =>
+        {
+            var alt = w.Wert;
+            var geaendert = await Service.AuswahlwertUmbenennenAsync(w.Id, name);
+            meldung = geaendert > 0 ? $"„{alt}“ heißt jetzt „{name.Trim()}“ – in {geaendert} Ticket(s) geändert." : null;
+        });
+        await Laden();   // auch bei Fehler: alten Namen wieder anzeigen
+    }
+
+    private async Task Loeschen(Auswahlwert w)
+    {
+        loeschenId = null;
+        await Ausfuehren(w.Feld, async () =>
+        {
+            await Service.AuswahlwertLoeschenAsync(w.Id);
+            werte!.Remove(w);
+        });
+    }
+
+    private async Task Verschieben(AuswahlFeld feld, List<Auswahlwert> liste, int index, int richtung)
+    {
+        var ziel = index + richtung;
+        if (ziel < 0 || ziel >= liste.Count) return;
+        (liste[index], liste[ziel]) = (liste[ziel], liste[index]);
+        for (var i = 0; i < liste.Count; i++) liste[i].Reihenfolge = i + 1;
+        await Ausfuehren(feld, () => Service.AuswahlwerteSortierenAsync(feld, liste.Select(x => x.Id).ToList()));
+    }
+
+    /// <summary>Führt eine Änderung aus und zeigt Fehler (z. B. doppelter Name) unter der Liste an.</summary>
+    private async Task Ausfuehren(AuswahlFeld feld, Func<Task> aktion)
+    {
+        fehler.Remove(feld);
+        try { await aktion(); }
+        catch (InvalidOperationException ex) { fehler[feld] = ex.Message; }
+    }
+}
